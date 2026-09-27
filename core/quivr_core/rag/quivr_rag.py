@@ -33,6 +33,53 @@ from quivr_core.rag.utils import (
 )
 
 logger = logging.getLogger("quivr_core")
+
+# Patterns for dynamic code execution primitives that must be removed from LLM output
+import re
+
+_DANGEROUS_PATTERNS = re.compile(
+    r"(?m)^.*"
+    r"(?:"
+    r"\beval\s*\("
+    r"|\bexec\s*\("
+    r"|\bexecfile\s*\("
+    r"|\bcompile\s*\("
+    r"|\b__import__\s*\("
+    r"|subprocess\.(?:call|run|Popen|check_output|check_call)\s*\([^)]*shell\s*=\s*True"
+    r"|os\.system\s*\("
+    r"|os\.popen\s*\("
+    r"|commands\.getoutput\s*\("
+    r"|\beval\b"
+    r"|\$\(.*\)"
+    r"|`[^`]*`"
+    r"|\beval\s+"
+    r").*$",
+    re.IGNORECASE,
+)
+
+
+def sanitize_llm_output(text: str) -> str:
+    """Remove lines containing dynamic code execution primitives from LLM output.
+
+    Checks for and removes lines containing:
+    - Python eval(), exec(), execfile(), compile(), __import__()
+    - subprocess calls with shell=True
+    - os.system(), os.popen()
+    - JavaScript eval
+    - Bash command substitution: $(...) and backtick execution
+    - Bash eval builtin
+    """
+    if not text:
+        return text
+    sanitized = _DANGEROUS_PATTERNS.sub("", text)
+    # Clean up any double blank lines introduced by removal
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+    if sanitized != text:
+        logger.warning(
+            "sanitize_llm_output: removed one or more lines containing "
+            "dynamic code execution primitives from LLM response."
+        )
+    return sanitized
 langfuse_service = LangfuseService()
 langfuse_handler = langfuse_service.get_handler()
 
@@ -79,7 +126,7 @@ class QuivrQARAG:
         """
         Filter out the chat history to only include the messages that are relevant to the current question
 
-        Takes in a chat_history= [HumanMessage(content='Qui est Chloé ? '), AIMessage(content="Chloé est une salariée travaillant pour l'entreprise Quivr en tant qu'AI Engineer, sous la direction de son supérieur hiérarchique, Stanislas Girard."), HumanMessage(content='Dis moi en plus sur elle'), AIMessage(content=''), HumanMessage(content='Dis moi en plus sur elle'), AIMessage(content="Désolé, je n'ai pas d'autres informations sur Chloé à partir des fichiers fournis.")]
+        Takes in a chat_history= [HumanMessage(content='Qui est REDACTED ? '), AIMessage(content="REDACTED est une salariée travaillant pour l'entreprise Quivr en tant qu'AI Engineer, sous la direction de son supérieur hiérarchique, REDACTED."), HumanMessage(content='Dis moi en plus sur elle'), AIMessage(content=''), HumanMessage(content='Dis moi en plus sur elle'), AIMessage(content="Désolé, je n'ai pas d'autres informations sur REDACTED à partir des fichiers fournis.")]
         Returns a filtered chat_history with in priority: first max_tokens, then max_history where a Human message and an AI message count as one pair
         a token is 4 characters
         """
@@ -172,6 +219,62 @@ class QuivrQARAG:
             list_files, self.retrieval_config.max_files
         )
         conversational_qa_chain = self.build_chain(concat_list_files)
+
+        # --- Provenance helpers (fail-closed) ---
+        import hashlib, hmac, os, time, json
+
+        _PROVENANCE_SECRET = os.environ.get("QUIVR_PROVENANCE_SECRET", "")
+        if not _PROVENANCE_SECRET:
+            raise RuntimeError(
+                "QUIVR_PROVENANCE_SECRET env var is not set; "
+                "cannot sign AI-generated content provenance. Refusing to serve."
+            )
+
+        _prompt_hash = hashlib.sha256(
+            (question or "").encode("utf-8")
+        ).hexdigest()
+
+        _model_id = getattr(
+            getattr(self, "llm_endpoint", None), "model", "unknown-model"
+        )
+
+        def _build_provenance(chunk_index: int, is_last: bool) -> dict:
+            """Build and cryptographically sign a provenance envelope."""
+            envelope = {
+                "origin": "ai-generated",
+                "content_label": "SYNTHETIC_AI_CONTENT",
+                "model_id": _model_id,
+                "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "prompt_hash": _prompt_hash,
+                "chunk_index": chunk_index,
+                "is_last_chunk": is_last,
+            }
+            payload = json.dumps(envelope, sort_keys=True).encode("utf-8")
+            signature = hmac.new(
+                _PROVENANCE_SECRET.encode("utf-8"), payload, hashlib.sha256
+            ).hexdigest()
+            envelope["provenance_signature"] = signature
+            return envelope
+
+        def _attach_provenance(
+            parsed: "ParsedRAGChunkResponse", chunk_index: int, is_last: bool
+        ) -> "ParsedRAGChunkResponse":
+            """Attach provenance envelope to a chunk; fail closed on error."""
+            try:
+                provenance = _build_provenance(chunk_index, is_last)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Provenance signing failed for chunk {chunk_index}: {exc}; "
+                    "refusing to serve unsigned AI-generated content."
+                ) from exc
+            # Store provenance on the metadata object so it travels with the chunk
+            if hasattr(parsed.metadata, "provenance"):
+                parsed.metadata.provenance = provenance  # type: ignore[attr-defined]
+            else:
+                # Fallback: attach as a dynamic attribute so consumers can inspect it
+                object.__setattr__(parsed, "provenance", provenance)
+            return parsed
+        # --- end provenance helpers ---
         raw_llm_response = conversational_qa_chain.invoke(
             {
                 "question": question,
@@ -228,27 +331,50 @@ class QuivrQARAG:
                     if self.llm_endpoint.supports_func_calling():
                         diff_answer = answer_str[len(prev_answer) :]
                         if len(diff_answer) > 0:
-                            parsed_chunk = ParsedRAGChunkResponse(
-                                answer=diff_answer,
-                                metadata=RAGResponseMetadata(),
+                                                    parsed_chunk = ParsedRAGChunkResponse(
+                            answer=sanitize_llm_output(diff_answer),
+                            metadata=RAGResponseMetadata(),
+                        ),
                             )
                             prev_answer += diff_answer
 
+                            parsed_chunk = _attach_provenance(
+                                parsed_chunk, chunk_id, is_last=False
+                            )
                             logger.debug(
                                 f"answer_astream func_calling=True question={question} rolling_msg={rolling_message} chunk_id={chunk_id}, chunk={parsed_chunk}"
                             )
                             yield parsed_chunk
                     else:
                         parsed_chunk = ParsedRAGChunkResponse(
-                            answer=answer_str,
+                            answer=sanitize_llm_output(answer_str),
                             metadata=RAGResponseMetadata(),
+                        )
+                        parsed_chunk = _attach_provenance(
+                            parsed_chunk, chunk_id, is_last=False
                         )
                         logger.debug(
                             f"answer_astream func_calling=False question={question} rolling_msg={rolling_message} chunk_id={chunk_id}, chunk={parsed_chunk}"
                         )
                         yield parsed_chunk
 
+                    full_response_chunks.append(answer_str)
                     chunk_id += 1
+
+        # Log the full LLM interaction (request + complete response)
+        logger.info(
+            "LLM interaction response",
+            extra={
+                "event": "llm_response",
+                "question": question,
+                "model": self.llm_endpoint.llm.model_name
+                if hasattr(self.llm_endpoint.llm, "model_name")
+                else str(self.llm_endpoint.llm),
+                "full_response": "".join(full_response_chunks),
+                "chunk_count": chunk_id,
+                "sources_count": len(sources),
+            },
+        )
 
         # Last chunk provides metadata
         last_chunk = ParsedRAGChunkResponse(
@@ -256,6 +382,7 @@ class QuivrQARAG:
             metadata=get_chunk_metadata(rolling_message, sources),
             last_chunk=True,
         )
+        last_chunk = _attach_provenance(last_chunk, chunk_id, is_last=True)
         logger.debug(
             f"answer_astream last_chunk={last_chunk} question={question} rolling_msg={rolling_message} chunk_id={chunk_id}"
         )
