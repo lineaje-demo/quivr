@@ -9,6 +9,41 @@ from chainlit.element import Element
 from io import BytesIO
 
 
+import re
+
+# Patterns for dynamic code execution primitives that must be removed
+_DANGEROUS_PATTERNS = re.compile(
+    r"(?m)^.*"
+    r"(?:"
+    r"\beval\s*\("
+    r"|\bexec\s*\("
+    r"|\bsubprocess\s*\.\s*(?:call|run|Popen)\s*\([^)]*shell\s*=\s*True"
+    r"|\bos\.system\s*\("
+    r"|\bos\.popen\s*\("
+    r"|\b__import__\s*\("
+    r"|\bcompile\s*\("
+    r"|\bexecfile\s*\("
+    r"|\binput\s*\(.*\beval"
+    r"|<script[^>]*>[\s\S]*?</script>"
+    r"|javascript\s*:"
+    r"|bash\s+-c"
+    r"|\$\(.*\)"
+    r"|`[^`]*`"
+    r").*$",
+    re.IGNORECASE,
+)
+
+
+def sanitize_llm_output(text: str) -> str:
+    """Remove lines containing dynamic code execution primitives from LLM output."""
+    if not text:
+        return text
+    sanitized = _DANGEROUS_PATTERNS.sub("", text)
+    # Collapse multiple consecutive blank lines left by removed lines
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+    return sanitized.strip()
+
+
 @cl.on_chat_start
 async def on_chat_start():
     files = None
@@ -49,6 +84,39 @@ async def on_chat_start():
     cl.user_session.set("brain", brain)
 
 
+import re
+
+def mask_pii(text: str) -> str:
+    """Mask zero-tolerance PII categories before displaying on UI."""
+    if not isinstance(text, str):
+        return text
+    # Social Security Number (SSN): 123-45-6789 or 123456789
+    text = re.sub(r'\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b', '[SSN REDACTED]', text)
+    # Taxpayer Identification Number (TIN): same pattern as SSN / EIN 12-3456789
+    text = re.sub(r'\b\d{2}-\d{7}\b', '[TIN REDACTED]', text)
+    # Credit Card Number: 13-19 digit sequences (with or without spaces/dashes)
+    text = re.sub(r'\b(?:\d[ -]?){13,19}\b', '[CC REDACTED]', text)
+    # Passport Number: letter(s) followed by 6-9 digits
+    text = re.sub(r'\b[A-Z]{1,2}\d{6,9}\b', '[PASSPORT REDACTED]', text)
+    # Driver's License: common formats (letter + digits or all digits 8-12)
+    text = re.sub(r'\b[A-Z]{1,2}\d{6,8}\b', '[DL REDACTED]', text)
+    # Financial Account Number: 8-17 digit sequences not already caught
+    text = re.sub(r'\b\d{8,17}\b', '[ACCOUNT REDACTED]', text)
+    # Email address
+    text = re.sub(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b', '[EMAIL REDACTED]', text)
+    # Personal Phone Number: various formats
+    text = re.sub(r'\b(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b', '[PHONE REDACTED]', text)
+    # IP Address (IPv4)
+    text = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', '[IP REDACTED]', text)
+    # MAC Address
+    text = re.sub(r'\b(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b', '[MAC REDACTED]', text)
+    # Vehicle Identification Number (VIN): 17 alphanumeric chars
+    text = re.sub(r'\b[A-HJ-NPR-Z0-9]{17}\b', '[VIN REDACTED]', text)
+    # Year of Birth patterns (e.g. DOB: 1985, Born: 1972)
+    text = re.sub(r'(?i)\b(?:dob|date of birth|born|birth year)[:\s]+\d{4}\b', '[DOB REDACTED]', text)
+    return text
+
+
 @cl.on_message
 async def main(message: cl.Message):
 
@@ -80,20 +148,24 @@ async def main(message: cl.Message):
     elements = []
 
     # Use the ask_stream method for streaming responses
+    logger.info("LLM interaction start: brain.ask_streaming | input: %s | retrieval_config: %s", message.content, retrieval_config)
+    full_response_chunks = []
     async for chunk in brain.ask_streaming(message.content, retrieval_config=retrieval_config):
-        await msg.stream_token(chunk.answer)
+        safe_answer = sanitize_llm_output(chunk.answer)
+        await msg.stream_token(safe_answer)
         for source in chunk.metadata.sources:
             if source.page_content not in saved_sources:
                 saved_sources.add(source.page_content)
                 saved_sources_complete.append(source)
                 print(source)
-                elements.append(cl.Text(name=source.metadata["original_file_name"], content=source.page_content, display="side"))
+                elements.append(cl.Text(name=source.metadata["original_file_name"], content=mask_pii(source.page_content), display="side"))
     
     think.status = cl.TaskStatus.DONE
     tts.status = cl.TaskStatus.RUNNING
     await task_list.update()
     
-    audio_file = await text_to_speech(msg.content)
+    safe_tts_input = sanitize_llm_output(msg.content)
+    audio_file = await text_to_speech(safe_tts_input)
     elements.append(cl.Audio(content=audio_file, auto_play=True, mime="audio/mpeg"))
 
     sources = ""
@@ -117,14 +189,15 @@ async def speech_to_text(audio_file):
         model="whisper-1", file=audio_file
     )
 
-    return response.text
+    return sanitize_llm_output(response.text)
 
 @cl.step(type="tool", name="Text to speech")
 async def text_to_speech(text):
+    logger.info("LLM interaction start: audio.speech.create | model: tts-1 | voice: alloy | input: %s", text)
     response = await async_openai_client.audio.speech.create(
         model="tts-1", voice="alloy", input=text
     )
-
+    logger.info("LLM interaction end: audio.speech.create | output_size_bytes: %d", len(response.content))
     return response.content
 
 

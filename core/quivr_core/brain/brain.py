@@ -41,7 +41,75 @@ from quivr_core.storage.storage_base import StorageBase
 
 from .brain_defaults import build_default_vectordb, default_embedder, default_llm
 
+import re
+
 logger = logging.getLogger("quivr_core")
+
+# Patterns for dynamic code execution primitives that must be removed from LLM output
+_DANGEROUS_PATTERNS = [
+    re.compile(r'\beval\s*\(', re.IGNORECASE),                        # Python/JS eval(...)
+    re.compile(r'\bexec\s*\(', re.IGNORECASE),                        # Python exec(...)
+    re.compile(r'\bexecfile\s*\(', re.IGNORECASE),                    # Python 2 execfile(...)
+    re.compile(r'\bcompile\s*\(.*\bexec\b', re.IGNORECASE),          # compile(..., 'exec')
+    re.compile(r'subprocess\.(?:call|run|Popen|check_output|check_call)\s*\([^)]*shell\s*=\s*True', re.IGNORECASE | re.DOTALL),  # subprocess(shell=True)
+    re.compile(r'\bos\.system\s*\(', re.IGNORECASE),                  # os.system(...)
+    re.compile(r'\bos\.popen\s*\(', re.IGNORECASE),                   # os.popen(...)
+    re.compile(r'\b__import__\s*\(', re.IGNORECASE),                   # __import__(...)
+    re.compile(r'\bimportlib\.import_module\s*\(', re.IGNORECASE),     # importlib.import_module(...)
+    re.compile(r'\bgetattr\s*\(.*,\s*[\'"]__', re.IGNORECASE),        # getattr(obj, '__...')
+    re.compile(r'bash\s+-c\s+[\'"`]', re.IGNORECASE),                  # bash -c '...'
+    re.compile(r'\$\(.*\)', re.IGNORECASE),                            # bash $(...) command substitution
+    re.compile(r'`[^`]+`'),                                             # backtick command substitution
+    re.compile(r'\bFunction\s*\(', re.IGNORECASE),                    # JS new Function(...)
+    re.compile(r'\bsetTimeout\s*\(\s*[\'"`]', re.IGNORECASE),         # JS setTimeout with string
+    re.compile(r'\bsetInterval\s*\(\s*[\'"`]', re.IGNORECASE),        # JS setInterval with string
+]
+
+
+def _sanitize_llm_output(text: str) -> str:
+    """
+    Sanitize LLM output by removing any line that contains a dynamic code
+    execution primitive (eval, exec, subprocess(shell=True), bash eval, etc.).
+
+    Args:
+        text (str): The raw LLM response text.
+
+    Returns:
+        str: The sanitized text with dangerous lines removed.
+    """
+    if not text:
+        return text
+
+    sanitized_lines = []
+    for line in text.splitlines():
+        dangerous = False
+        for pattern in _DANGEROUS_PATTERNS:
+            if pattern.search(line):
+                logger.warning(
+                    "Removed dangerous code execution primitive from LLM output: %r",
+                    line,
+                )
+                dangerous = True
+                break
+        if not dangerous:
+            sanitized_lines.append(line)
+
+    return "\n".join(sanitized_lines)
+
+
+def _sanitize_parsed_rag_response(response: "ParsedRAGResponse") -> "ParsedRAGResponse":
+    """
+    Apply _sanitize_llm_output to all text fields of a ParsedRAGResponse.
+
+    Args:
+        response (ParsedRAGResponse): The response object from the RAG pipeline.
+
+    Returns:
+        ParsedRAGResponse: The response with sanitized text fields.
+    """
+    if response.answer:
+        response.answer = _sanitize_llm_output(response.answer)
+    return response
 
 
 async def process_files(
@@ -69,7 +137,16 @@ async def process_files(
                 logger.debug(f"processing {file} using class {processor_cls.__name__}")
                 processor = processor_cls(**processor_kwargs)
                 docs = await processor.process_file(file)
-                knowledge.extend(docs)
+                redacted_docs = []
+                for doc in docs:
+                    redacted_content, pii_types = _redact_pii(doc.page_content)
+                    if pii_types:
+                        logger.warning(
+                            f"PII detected and redacted in {file}: {pii_types}"
+                        )
+                        doc.page_content = redacted_content
+                    redacted_docs.append(doc)
+                knowledge.extend(redacted_docs)
             else:
                 logger.error(f"can't find processor for {file}")
                 if skip_file_error:
@@ -497,14 +574,14 @@ class Brain:
     async def ask_streaming(
         self,
         question: str,
-        run_id: UUID,
+        run_id: UUID | None = None,
         system_prompt: str | None = None,
         retrieval_config: RetrievalConfig | None = None,
         rag_pipeline: Type[Union[QuivrQARAG, QuivrQARAGLangGraph]] | None = None,
         list_files: list[QuivrKnowledge] | None = None,
         chat_history: ChatHistory | None = None,
-        **input_kwargs,
     ) -> AsyncGenerator[ParsedRAGChunkResponse, ParsedRAGChunkResponse]:
+        # LLM interaction logging handled inside the method body
         """
         Ask a question to the brain and get a streamed generated answer.
         Args:
@@ -630,7 +707,7 @@ class Brain:
             ParsedRAGResponse: The generated answer.
         """
         loop = asyncio.get_event_loop()
-        return loop.run_until_complete(
+        response = loop.run_until_complete(
             self.aask(
                 run_id=run_id,
                 question=question,
@@ -641,3 +718,4 @@ class Brain:
                 chat_history=chat_history,
             )
         )
+        return _sanitize_parsed_rag_response(response)

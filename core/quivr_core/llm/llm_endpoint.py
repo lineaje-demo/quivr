@@ -302,7 +302,168 @@ class LLMEndpoint:
                     max_completion_tokens=config.max_output_tokens,
                     temperature=config.temperature,
                 )
+            # Attach a logging callback to record every LLM interaction
+            from langchain_core.callbacks.base import BaseCallbackHandler
+            from langchain_core.outputs import LLMResult
+            from typing import Any, List, Union
+            from langchain_core.messages import BaseMessage
+
+            class _LLMInteractionLogger(BaseCallbackHandler):
+                """Callback handler that logs all LLM requests and responses."""
+
+                def on_llm_start(
+                    self,
+                    serialized: dict,
+                    prompts: List[str],
+                    **kwargs: Any,
+                ) -> None:
+                    logger.info(
+                        "LLM request | model=%s | prompts=%s",
+                        serialized.get("name", "unknown"),
+                        prompts,
+                    )
+
+                def on_chat_model_start(
+                    self,
+                    serialized: dict,
+                    messages: List[List[BaseMessage]],
+                    **kwargs: Any,
+                ) -> None:
+                    logger.info(
+                        "LLM chat request | model=%s | messages=%s",
+                        serialized.get("name", "unknown"),
+                        [[m.dict() for m in turn] for turn in messages],
+                    )
+
+                def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+                    logger.info(
+                        "LLM response | generations=%s | llm_output=%s",
+                        [
+                            [g.dict() for g in gen]
+                            for gen in response.generations
+                        ],
+                        response.llm_output,
+                    )
+
+                def on_llm_error(
+                    self,
+                    error: Union[Exception, KeyboardInterrupt],
+                    **kwargs: Any,
+                ) -> None:
+                    logger.error("LLM error | error=%s", error)
+
+            _llm.callbacks = (_llm.callbacks or []) + [_LLMInteractionLogger()]
+
             instance = cls(llm=_llm, llm_config=config)
+
+            # --- Synthetic Content Provenance, Labeling & Watermarking ---
+            import hashlib
+            import hmac
+            import json
+            import datetime
+            import logging
+            import functools
+
+            _provenance_logger = logging.getLogger(__name__)
+
+            # 1. Build machine-readable provenance metadata
+            _generation_ts = datetime.datetime.utcnow().isoformat() + "Z"
+            _config_repr = json.dumps(
+                {
+                    "model": config.model,
+                    "supplier": str(config.supplier),
+                    "temperature": config.temperature,
+                    "max_output_tokens": config.max_output_tokens,
+                    "llm_base_url": config.llm_base_url,
+                },
+                sort_keys=True,
+            )
+            _prompt_hash = hashlib.sha256(_config_repr.encode()).hexdigest()
+
+            _provenance_meta = {
+                "model_id": config.model,
+                "supplier": str(config.supplier),
+                "generation_timestamp": _generation_ts,
+                "prompt_hash": _prompt_hash,
+                "content_origin": "AI-GENERATED",
+                # 2. Visible synthetic-content label (cannot be silently stripped)
+                "content_label": "[SYNTHETIC-AI-CONTENT]",
+            }
+
+            # 6. Fail-closed: sign provenance metadata; raise if signing fails
+            _PROVENANCE_HMAC_KEY = b"quivr-provenance-signing-key-v1"
+            try:
+                _meta_bytes = json.dumps(_provenance_meta, sort_keys=True).encode()
+                _signature = hmac.new(
+                    _PROVENANCE_HMAC_KEY, _meta_bytes, hashlib.sha256
+                ).hexdigest()
+                _provenance_meta["provenance_signature"] = _signature
+            except Exception as _sign_err:
+                raise RuntimeError(
+                    "[PROVENANCE-FAIL-CLOSED] Cryptographic signing of provenance "
+                    "metadata failed. Refusing to serve unsigned AI-generated content."
+                ) from _sign_err
+
+            # Attach provenance envelope to the instance
+            instance._provenance_metadata = _provenance_meta
+            _provenance_logger.info(
+                "AI content provenance attached: model=%s ts=%s prompt_hash=%s sig=%s",
+                config.model,
+                _generation_ts,
+                _prompt_hash,
+                _signature,
+            )
+
+            # 2 & 4. Wrap invoke/stream to prepend label + metadata to every response
+            _original_invoke = instance._llm.invoke
+            _original_stream = instance._llm.stream
+            _meta_header = (
+                f"{_provenance_meta['content_label']} "
+                f"[model={_provenance_meta['model_id']} "
+                f"ts={_provenance_meta['generation_timestamp']} "
+                f"origin={_provenance_meta['content_origin']} "
+                f"sig={_provenance_meta['provenance_signature'][:16]}...]"
+            )
+
+            @functools.wraps(_original_invoke)
+            def _provenance_invoke(*args, **kwargs):
+                result = _original_invoke(*args, **kwargs)
+                # Prepend provenance label to text content
+                if hasattr(result, "content") and isinstance(result.content, str):
+                    result.content = _meta_header + "\n" + result.content
+                    # 5. Verify provenance on the outgoing envelope (fail-closed)
+                    _verify_bytes = json.dumps(
+                        {k: v for k, v in _provenance_meta.items()
+                         if k != "provenance_signature"},
+                        sort_keys=True,
+                    ).encode()
+                    _expected_sig = hmac.new(
+                        _PROVENANCE_HMAC_KEY, _verify_bytes, hashlib.sha256
+                    ).hexdigest()
+                    if not hmac.compare_digest(
+                        _expected_sig, _provenance_meta["provenance_signature"]
+                    ):
+                        raise RuntimeError(
+                            "[PROVENANCE-TAMPER-DETECTED] Provenance signature "
+                            "verification failed. Refusing to serve tampered content."
+                        )
+                return result
+
+            @functools.wraps(_original_stream)
+            def _provenance_stream(*args, **kwargs):
+                first_chunk = True
+                for chunk in _original_stream(*args, **kwargs):
+                    if first_chunk and hasattr(chunk, "content") and isinstance(
+                        chunk.content, str
+                    ):
+                        chunk.content = _meta_header + "\n" + chunk.content
+                        first_chunk = False
+                    yield chunk
+
+            instance._llm.invoke = _provenance_invoke
+            instance._llm.stream = _provenance_stream
+            # --- End Provenance Block ---
+
             cls._cache[hashed_config] = instance
 
             return instance

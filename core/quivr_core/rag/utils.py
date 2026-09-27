@@ -1,4 +1,8 @@
+import hashlib
+import hmac
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, no_type_check
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -69,6 +73,60 @@ def get_chunk_metadata(
     return RAGResponseMetadata(**metadata, metadata_model=None)
 
 
+# Patterns that indicate dynamic code execution primitives in LLM output
+_DANGEROUS_PATTERNS = [
+    r"\beval\s*\(",                        # Python/JS eval(...)
+    r"\bexec\s*\(",                        # Python exec(...)
+    r"\bexecfile\s*\(",                    # Python 2 execfile(...)
+    r"\bcompile\s*\(",                     # Python compile(...)
+    r"\b__import__\s*\(",                  # Python __import__(...)
+    r"\bimportlib\.import_module\s*\(",    # importlib dynamic import
+    r"subprocess\.(?:call|run|Popen|check_output|check_call)\s*\([^)]*shell\s*=\s*True",  # subprocess shell=True
+    r"\bos\.system\s*\(",                  # os.system(...)
+    r"\bos\.popen\s*\(",                   # os.popen(...)
+    r"\bcommands\.getoutput\s*\(",         # commands.getoutput(...)
+    r"\$\(.*\)",                           # bash $(...) command substitution
+    r"`[^`]+`",                            # bash backtick execution
+    r"\beval\s+[^\n]+",                    # bash eval ...
+    r"\bnew\s+Function\s*\(",              # JS new Function(...)
+    r"setTimeout\s*\(\s*['\"][^'\"]+['\"]\s*,",  # JS setTimeout with string
+    r"setInterval\s*\(\s*['\"][^'\"]+['\"]\s*,",  # JS setInterval with string
+]
+
+_COMPILED_DANGEROUS_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in _DANGEROUS_PATTERNS
+]
+
+
+def sanitize_llm_output(text: str) -> str:
+    """Remove lines from LLM output that contain dynamic code execution primitives.
+
+    Args:
+        text: The raw LLM output string.
+
+    Returns:
+        The sanitized string with dangerous lines removed.
+    """
+    if not text:
+        return text
+
+    sanitized_lines = []
+    for line in text.splitlines():
+        dangerous = False
+        for pattern in _COMPILED_DANGEROUS_PATTERNS:
+            if pattern.search(line):
+                logger.warning(
+                    "Removed potentially dangerous line from LLM output: %r",
+                    line,
+                )
+                dangerous = True
+                break
+        if not dangerous:
+            sanitized_lines.append(line)
+
+    return "\n".join(sanitized_lines)
+
+
 def get_prev_message_str(msg: AIMessageChunk) -> str:
     if msg.tool_calls:
         cited_answer = next(x for x in msg.tool_calls if cited_answer_filter(x))
@@ -100,8 +158,8 @@ def parse_chunk_response(
     tool_calls = rolling_msg.tool_calls
 
     if not supports_func_calling or not tool_calls:
-        new_content = raw_chunk.content  # Just the new chunk's content
-        full_content = rolling_msg.content  # The full accumulated content
+        new_content = sanitize_llm_output(str(raw_chunk.content))  # Just the new chunk's content
+        full_content = sanitize_llm_output(str(rolling_msg.content))  # The full accumulated content
         return rolling_msg, new_content, full_content
 
     current_answers = get_answers_from_tool_calls(tool_calls)
@@ -109,6 +167,7 @@ def parse_chunk_response(
     if not full_answer:
         full_answer = previous_content
 
+    full_answer = sanitize_llm_output(full_answer)
     new_content = full_answer[len(previous_content) :]
 
     return rolling_msg, new_content, full_answer
@@ -128,6 +187,15 @@ def get_answers_from_tool_calls(tool_calls):
 
 @no_type_check
 def parse_response(raw_response: RawRAGResponse, model_name: str) -> ParsedRAGResponse:
+    logger.info(
+        "LLM interaction received",
+        extra={
+            "model_name": model_name,
+            "raw_answer_content": getattr(raw_response.get("answer"), "content", None),
+            "raw_answer_tool_calls": getattr(raw_response.get("answer"), "tool_calls", []),
+            "num_docs": len(raw_response.get("docs", [])),
+        },
+    )
     answers = []
     sources = raw_response["docs"] if "docs" in raw_response else []
 
@@ -156,7 +224,7 @@ def parse_response(raw_response: RawRAGResponse, model_name: str) -> ParsedRAGRe
     else:
         answers.append(raw_response["answer"].content)
 
-    answer_str = "\n".join(answers)
+    answer_str = sanitize_llm_output("\n".join(answers))
     parsed_response = ParsedRAGResponse(answer=answer_str, metadata=metadata)
     return parsed_response
 

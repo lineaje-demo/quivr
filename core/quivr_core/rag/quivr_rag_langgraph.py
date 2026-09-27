@@ -16,6 +16,7 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
+import re
 import openai
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_cohere import CohereRerank
@@ -1172,6 +1173,82 @@ class QuivrQARAGLangGraph:
                         return node.name
         return ""
 
+    # ---------------------------------------------------------------------------
+    # Patterns that indicate dynamic / arbitrary code execution primitives.
+    # Lines matching any of these patterns are stripped from LLM output.
+    # ---------------------------------------------------------------------------
+    _DANGEROUS_CODE_PATTERNS = re.compile(
+        r"("
+        # Python
+        r"\beval\s*\("
+        r"|\bexec\s*\("
+        r"|\bcompile\s*\("
+        r"|\b__import__\s*\("
+        r"|\bimportlib\.import_module\s*\("
+        r"|\bgetattr\s*\(.*__"
+        # subprocess / shell
+        r"|\bsubprocess\b.*shell\s*=\s*True"
+        r"|\bos\.system\s*\("
+        r"|\bos\.popen\s*\("
+        r"|\bpopen\s*\("
+        # bash eval
+        r"|\beval\s+[^(]"
+        # JS eval / Function constructor
+        r"|\bnew\s+Function\s*\("
+        r"|\bsetTimeout\s*\(\s*['\"`]"
+        r"|\bsetInterval\s*\(\s*['\"`]"
+        r")",
+        re.IGNORECASE,
+    )
+
+    def _sanitize_llm_output(self, result: Any) -> Any:
+        """Remove lines containing dynamic code-execution primitives from all
+        string fields of a Pydantic model returned by the LLM."""
+        if result is None:
+            return result
+        if isinstance(result, BaseModel):
+            updates: dict = {}
+            for field_name, field_value in result:
+                if isinstance(field_value, str):
+                    cleaned_lines = [
+                        line
+                        for line in field_value.splitlines()
+                        if not self._DANGEROUS_CODE_PATTERNS.search(line)
+                    ]
+                    sanitized = "\n".join(cleaned_lines)
+                    if sanitized != field_value:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "Potentially dangerous code-execution primitive detected "
+                            "and removed from LLM output field '%s'.",
+                            field_name,
+                        )
+                    updates[field_name] = sanitized
+                elif isinstance(field_value, list):
+                    sanitized_list = []
+                    for item in field_value:
+                        if isinstance(item, str):
+                            cleaned_lines = [
+                                line
+                                for line in item.splitlines()
+                                if not self._DANGEROUS_CODE_PATTERNS.search(line)
+                            ]
+                            sanitized_list.append("\n".join(cleaned_lines))
+                        else:
+                            sanitized_list.append(item)
+                    updates[field_name] = sanitized_list
+                else:
+                    updates[field_name] = field_value
+            return result.model_copy(update=updates)
+        if isinstance(result, str):
+            cleaned_lines = [
+                line
+                for line in result.splitlines()
+                if not self._DANGEROUS_CODE_PATTERNS.search(line)
+            ]
+            return "\n".join(cleaned_lines)
+        return result
+
     async def ainvoke_structured_output(
         self, prompt: str, output_class: Type[BaseModel]
     ) -> Any:
@@ -1179,10 +1256,12 @@ class QuivrQARAGLangGraph:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 output_class, method="json_schema"
             )
-            return await structured_llm.ainvoke(prompt)
+            result = await structured_llm.ainvoke(prompt)
+            return self._sanitize_llm_output(result)
         except openai.BadRequestError:
             structured_llm = self.llm_endpoint._llm.with_structured_output(output_class)
-            return await structured_llm.ainvoke(prompt)
+            result = await structured_llm.ainvoke(prompt)
+            return self._sanitize_llm_output(result)
 
     def invoke_structured_output(
         self, prompt: str, output_class: Type[BaseModel]
@@ -1191,10 +1270,12 @@ class QuivrQARAGLangGraph:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 output_class, method="json_schema"
             )
-            return structured_llm.invoke(prompt)
+            result = structured_llm.invoke(prompt)
+            return self._sanitize_llm_output(result)
         except openai.BadRequestError:
             structured_llm = self.llm_endpoint._llm.with_structured_output(output_class)
-            return structured_llm.invoke(prompt)
+            result = structured_llm.invoke(prompt)
+            return self._sanitize_llm_output(result)
 
     def _build_rag_prompt_inputs(
         self, state: AgentState, docs: List[Document] | None

@@ -92,6 +92,34 @@ async def test_brain_search(
     assert result[1].distance > result[0].distance
 
 
+import re
+
+# Patterns for dynamic code execution primitives that must not appear in LLM output
+_DANGEROUS_PATTERNS = re.compile(
+    r"\b(eval|exec)\s*\("
+    r"|subprocess\.(?:call|run|Popen)\s*\([^)]*shell\s*=\s*True"
+    r"|os\.system\s*\("
+    r"|__import__\s*\("
+    r"|compile\s*\("
+    r"|execfile\s*\("
+    r"|bash\s+-c"
+    r"|\$\(.*\)"
+    r"|`[^`]+`",
+    re.IGNORECASE,
+)
+
+
+def sanitize_llm_response(text: str) -> str:
+    """Remove lines containing dynamic code execution primitives from LLM output."""
+    if not text:
+        return text
+    sanitized_lines = [
+        line for line in text.splitlines()
+        if not _DANGEROUS_PATTERNS.search(line)
+    ]
+    return "\n".join(sanitized_lines)
+
+
 @pytest.mark.asyncio
 async def test_brain_get_history(
     fake_llm: LLMEndpoint, embedder, temp_data_file, mem_vector_store
@@ -104,8 +132,10 @@ async def test_brain_get_history(
         vector_db=mem_vector_store,
     )
 
-    await brain.aask("question")
-    await brain.aask("question")
+    result1 = await brain.aask("question")
+    sanitize_llm_response(result1.answer if hasattr(result1, 'answer') else str(result1))
+    result2 = await brain.aask("question")
+    sanitize_llm_response(result2.answer if hasattr(result2, 'answer') else str(result2))
 
     assert len(brain.default_chat) == 4
 
@@ -121,7 +151,8 @@ async def test_brain_ask_streaming(
 
     response = ""
     async for chunk in brain.ask_streaming("question"):
-        response += chunk.answer
+        safe_chunk = sanitize_llm_response(chunk.answer)
+        response += safe_chunk
 
     assert response == answers[1]
 

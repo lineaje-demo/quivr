@@ -53,6 +53,17 @@ class TikaProcessor(ProcessorBase):
 
     async def _send_parse_tika(self, f: AsyncIterable[bytes]) -> str:
         retry = 0
+        # POLICY VIOLATION WARNING: The Tika endpoint is being called without any
+        # authentication (no API key, bearer token, or other auth mechanism).
+        # This violates the policy that all LLM endpoints must require authentication.
+        # Authentication must be implemented before using this endpoint in production.
+        logger.warning(
+            "POLICY VIOLATION: The Tika endpoint (%s) is being accessed without "
+            "authentication. LLM endpoints must require authentication (e.g., an API key "
+            "or bearer token). Please implement an authentication mechanism before "
+            "deploying this in a production environment.",
+            self.tika_url,
+        )
         headers = {"Accept": "text/plain"}
         while retry < self.max_retries:
             try:
