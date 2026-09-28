@@ -67,7 +67,12 @@ def chunks_stream_answer():
 
 @pytest.fixture(autouse=True)
 def openai_api_key():
-    os.environ["OPENAI_API_KEY"] = "this-is-a-test-key"
+    _ai_dat_sec_001_api_key = os.environ.get("OPENAI_API_KEY")
+    if not _ai_dat_sec_001_api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Please set it before running tests."
+        )
 
 
 @pytest.fixture
