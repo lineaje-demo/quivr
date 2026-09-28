@@ -1,4 +1,7 @@
 import asyncio
+from lineaje_guardrail import lineaje_guardrail as _LineajeGuardrail
+_ai_app_sec_059_guardrail = _LineajeGuardrail()
+_ai_app_sec_059_guardrail.enable_policies(["AI_APP_SEC_059.json"])
 import logging
 import os
 from pathlib import Path
@@ -42,6 +45,109 @@ from quivr_core.storage.storage_base import StorageBase
 from .brain_defaults import build_default_vectordb, default_embedder, default_llm
 
 logger = logging.getLogger("quivr_core")
+
+import base64
+import binascii
+
+_ai_app_sec_070_patterns = [
+    # 1. instruction_override
+    (
+        r"(?i)(ignore\s+(all\s+)?previous\s+instructions?|forget\s+everything\s+above|disregard\s+(all\s+)?prior\s+instructions?|override\s+(all\s+)?previous\s+instructions?)",
+        "<prompt_injection_removed: instruction_override>",
+    ),
+    # 2. role_hijack
+    (
+        r"(?i)(you\s+are\s+now\s+(DAN|an?\s+unrestricted|a\s+different|a\s+new)|act\s+as\s+(unrestricted|DAN|an?\s+AI\s+without|a\s+different)|pretend\s+(you\s+are|to\s+be)\s+(an?\s+unrestricted|DAN))",
+        "<prompt_injection_removed: role_hijack>",
+    ),
+    # 3. delimiter_escape — fake </system>, </prompt>, </instruction> tags and injected separators
+    (
+        r"(?i)</?\s*(system|prompt|instruction|context|human|assistant|user|tool_response)\s*>",
+        "<prompt_injection_removed: delimiter_escape>",
+    ),
+    # 4. encoded_payload — base64-looking blobs (>=20 chars), hex strings, ROT13 triggers, URL-encoded instructions
+    (
+        r"(?i)((?:[A-Za-z0-9+/]{4}){5,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?|(?:0x[0-9a-fA-F]{2}\s*){6,}|%[0-9a-fA-F]{2}(?:%[0-9a-fA-F]{2}){5,})",
+        "<prompt_injection_removed: encoded_payload>",
+    ),
+    # 5. hidden_text — HTML comments, zero-width chars, CSS hidden spans
+    (
+        r"(?s)(<!--.*?-->|<span[^>]+display\s*:\s*none[^>]*>.*?</span>|[\u200b\u200c\u200d\u2060\ufeff]+)",
+        "<prompt_injection_removed: hidden_text>",
+    ),
+    # 6. fake_system_message
+    (
+        r"(?i)(\[\s*system\s*\]|\[\s*tool\s*\]|\[\s*assistant\s*\]|###\s*system\s*:|###\s*tool\s*:|<\|im_start\|>\s*system|<\|im_end\|>)",
+        "<prompt_injection_removed: fake_system_message>",
+    ),
+    # 7. exfiltration_attempt
+    (
+        r"(?i)(send\s+(the\s+)?(system\s+prompt|context|conversation|data|information)\s+to\s+(https?://|\S+@)|leak\s+(the\s+)?(system\s+prompt|context)|!\[.*?\]\(https?://[^)]+\?[^)]*\)|exfiltrate)",
+        "<prompt_injection_removed: exfiltration_attempt>",
+    ),
+    # 8. context_poisoning
+    (
+        r"(?i)(in\s+a\s+previous\s+(conversation|session|turn)\s+(you\s+)?(said|agreed|told\s+me)|remember\s+that\s+you\s+(previously|earlier|once)\s+(said|agreed|told))",
+        "<prompt_injection_removed: context_poisoning>",
+    ),
+    # 9. indirect_injection — payloads embedded in data/metadata markers
+    (
+        r"(?i)(\[\[\s*inject\s*\]\]|\{\{\s*inject\s*\}\}|<!--\s*inject|payload\s*:\s*inject)",
+        "<prompt_injection_removed: indirect_injection>",
+    ),
+    # 10. command_injection — shell/code execution
+    (
+        r"(?i)(import\s+os\s*;\s*os\.system|subprocess\.(?:call|run|Popen)|eval\s*\(|exec\s*\(|__import__\s*\(|`[^`]+`|\$\([^)]+\)|;\s*(rm|wget|curl|bash|sh|python|perl|ruby)\s+)",
+        "<prompt_injection_removed: command_injection>",
+    ),
+    # 11. split_payload — fragmented injection markers
+    (
+        r"(?i)(ignore.*?\n.*?instructions|forget.*?\n.*?above|override.*?\n.*?instructions)",
+        "<prompt_injection_removed: split_payload>",
+    ),
+    # 12. jailbreak_attempt
+    (
+        r"(?i)(jailbreak|developer\s+mode\s+(enabled|on)|DAN\s+mode|do\s+anything\s+now|fictional\s+framing|pretend\s+(this\s+is\s+)?fiction|as\s+a\s+fictional\s+AI)",
+        "<prompt_injection_removed: jailbreak_attempt>",
+    ),
+]
+
+
+def _ai_app_sec_070_sanitize(text: str) -> str:
+    """Neutralize prompt injection patterns in user-supplied text before LLM handoff."""
+    import re
+    if not text:
+        return text
+    for pattern, marker in _ai_app_sec_070_patterns:
+        text = re.sub(pattern, marker, text)
+    return text
+
+_AI_APP_SEC_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclient",
+    "deepseek",
+    "openrouter",
+    "usdeepseekr1v10",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model name for comparison."""
+    import re
+    return re.sub(r"[\s\-_\.:\u0000]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(model_name: str) -> None:
+    """Raise ValueError if model_name matches a disapproved model."""
+    normalized = _ai_app_sec_006_normalize(model_name)
+    for disapproved in _AI_APP_SEC_006_DISAPPROVED:
+        if disapproved in normalized or normalized in disapproved:
+            raise ValueError(
+                f"Model '{model_name}' is not approved for use in this organization."
+            )
 
 
 async def process_files(
@@ -200,7 +306,9 @@ class Brain:
             id=bserialized.id,
             name=bserialized.name,
             embedder=embedder,
-            llm=LLMEndpoint.from_config(bserialized.llm_config),
+            llm=LLMEndpoint.from_config(
+                (_ai_app_sec_006_check_model(bserialized.llm_config.llm_base_url or bserialized.llm_config.model) or bserialized.llm_config) and bserialized.llm_config
+            ),
             storage=storage,
             vector_db=vector_db,
         )
@@ -522,6 +630,9 @@ class Brain:
             print(chunk.answer)
         ```
         """
+        question = _ai_app_sec_059_guardrail.evaluate(question)
+        if system_prompt is not None:
+            system_prompt = _ai_app_sec_059_guardrail.evaluate(system_prompt)
         llm = self.llm
 
         # If you passed a different llm model we'll override the brain  one
@@ -546,6 +657,8 @@ class Brain:
             langfuse_session_id=str(self.chat_id),
         )
 
+        question = _ai_app_sec_070_sanitize(question)
+        system_prompt = _ai_app_sec_070_sanitize(system_prompt) if system_prompt else system_prompt
         async for response in rag_instance.answer_astream(
             run_id=run_id,
             question=question,
