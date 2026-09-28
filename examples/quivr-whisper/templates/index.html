@@ -32,6 +32,74 @@
     </div>
     <canvas id="audio-visualizer" class=""></canvas>
     <audio id="audio-playback" controls class="hidden"></audio>
+    <script>
+      const _ai_dat_sec_023_patterns = [
+        { label: 'SSN', pattern: /\b\d{3}-\d{2}-\d{4}\b/g },
+        { label: 'YEAR_OF_BIRTH', pattern: /\b(born|birth year|year of birth)[^\n]{0,30}\b(19|20)\d{2}\b/gi },
+        { label: 'BIRTHPLACE', pattern: /\b(born in|birthplace|place of birth)[^\n]{0,60}/gi },
+        { label: 'PHONE', pattern: /\b(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g },
+        { label: 'EMAIL', pattern: /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g },
+        { label: 'MOTHERS_MAIDEN_NAME', pattern: /\b(mother'?s?\s+maiden\s+name)[^\n]{0,60}/gi },
+        { label: 'HOME_ADDRESS', pattern: /\b\d{1,5}\s+[A-Za-z0-9\s]{3,40}(street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)\b[^\n]{0,60}/gi },
+        { label: 'PASSPORT', pattern: /\b[A-Z]{1,2}\d{6,9}\b/g },
+        { label: 'DRIVERS_LICENSE', pattern: /\b(driver'?s?\s+licen[sc]e|DL)[^\n]{0,30}[A-Z0-9]{5,20}/gi },
+        { label: 'TIN', pattern: /\b\d{2}-\d{7}\b/g },
+        { label: 'CREDIT_CARD', pattern: /\b(?:\d[ -]?){13,16}\b/g },
+        { label: 'FINANCIAL_ACCOUNT', pattern: /\b(account\s*(number|#|no\.?)[^\n]{0,20}\d{4,17})/gi },
+        { label: 'FINGERPRINTS', pattern: /\b(fingerprint)[^\n]{0,60}/gi },
+        { label: 'RETINA_IRIS', pattern: /\b(retina|iris)\s*(scan)?[^\n]{0,60}/gi },
+        { label: 'VOICE_SIGNATURE', pattern: /\b(voice\s*signature)[^\n]{0,60}/gi },
+        { label: 'FACIAL_IMAGE', pattern: /\b(facial\s*image|face\s*scan)[^\n]{0,60}/gi },
+        { label: 'MEDICAL_RECORDS', pattern: /\b(medical\s*record|diagnosis|prescription|patient\s*id)[^\n]{0,60}/gi },
+        { label: 'EMPLOYEE_ID', pattern: /\b(employee\s*(id|#|no\.?))[^\n]{0,20}\w{3,20}/gi },
+        { label: 'SCHOOL_ID', pattern: /\b(school\s*(id|#|no\.?))[^\n]{0,20}\w{3,20}/gi },
+        { label: 'VIN', pattern: /\b[A-HJ-NPR-Z0-9]{17}\b/g },
+        { label: 'IP_ADDRESS', pattern: /\b((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
+        { label: 'MAC_ADDRESS', pattern: /\b([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b/g },
+        { label: 'FINE_LOCATION', pattern: /\b(GPS|coordinates|latitude|longitude)[^\n]{0,80}/gi },
+        { label: 'ETHNICITY', pattern: /\b(ethnicity|ethnic\s*origin|race)[^\n]{0,60}/gi },
+        { label: 'SEXUAL_ORIENTATION', pattern: /\b(sexual\s*orientation|sexuality)[^\n]{0,60}/gi }
+      ];
+
+      function _ai_dat_sec_023_redact(text) {
+        let redacted = text;
+        for (const { label, pattern } of _ai_dat_sec_023_patterns) {
+          redacted = redacted.replace(pattern, `[REDACTED-${label}]`);
+        }
+        return redacted;
+      }
+
+      function _ai_dat_sec_023_handle_upload(event) {
+        const fileInput = document.getElementById('fileInput');
+        if (!fileInput.files || fileInput.files.length === 0) return;
+        event.preventDefault();
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const original = e.target.result;
+          const redacted = _ai_dat_sec_023_redact(original);
+          const blob = new Blob([redacted], { type: file.type || 'text/plain' });
+          const redactedFile = new File([blob], file.name, { type: file.type || 'text/plain' });
+          const dt = new DataTransfer();
+          dt.items.add(redactedFile);
+          fileInput.files = dt.files;
+          const form = fileInput.closest('form');
+          if (form) {
+            form.submit();
+          } else {
+            fileInput.dispatchEvent(new Event('_ai_dat_sec_023_ready', { bubbles: true }));
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const uploadBtn = document.getElementById('upload-btn');
+        if (uploadBtn) {
+          uploadBtn.addEventListener('click', _ai_dat_sec_023_handle_upload);
+        }
+      });
+    </script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

@@ -32,7 +32,156 @@ from quivr_core.rag.utils import (
     parse_response,
 )
 
+import base64
+import re
+
+import re
+
 logger = logging.getLogger("quivr_core")
+
+_ai_app_sec_070_patterns = [
+    # 1. instruction_override
+    (re.compile(r'ignore previous instructions|forget everything above', re.IGNORECASE), '<prompt_injection_removed: instruction_override>'),
+    # 2. role_hijack
+    (re.compile(r'you are now DAN|act as unrestricted', re.IGNORECASE), '<prompt_injection_removed: role_hijack>'),
+    # 3. delimiter_escape - fake </system> or </prompt> tags and injected separators
+    (re.compile(r'</?\s*system\s*>|</?\s*prompt\s*>', re.IGNORECASE), '<prompt_injection_removed: delimiter_escape>'),
+    # 4. encoded_payload - base64 blobs, hex sequences, ROT13 instructions, URL-encoded instructions
+    (re.compile(r'(?:[A-Za-z0-9+/]{40,}={0,2})', re.IGNORECASE), '<prompt_injection_removed: encoded_payload>'),
+    # 5. hidden_text - HTML comments, zero-width characters, CSS hidden text
+    (re.compile(r'<!--.*?-->|[\u200b-\u200f\u202a-\u202e\u2060\ufeff]|display\s*:\s*none', re.IGNORECASE | re.DOTALL), '<prompt_injection_removed: hidden_text>'),
+    # 6. fake_system_message
+    (re.compile(r'\[\s*system\s*\]|\bSYSTEM\s*MESSAGE\b|\bTOOL\s*RESPONSE\b', re.IGNORECASE), '<prompt_injection_removed: fake_system_message>'),
+    # 7. exfiltration_attempt
+    (re.compile(r'!\[.*?\]\(https?://[^)]+\)|send (this|the|all|data|prompt|system) (to|via) https?://|leak (the )?system prompt', re.IGNORECASE), '<prompt_injection_removed: exfiltration_attempt>'),
+    # 8. context_poisoning
+    (re.compile(r'from now on (you|your|all)|in all (future|subsequent) (responses|messages|turns)', re.IGNORECASE), '<prompt_injection_removed: context_poisoning>'),
+    # 10. command_injection - shell execution patterns
+    (re.compile(r'(?:^|\s)(?:sudo|bash|sh|cmd|powershell|exec|eval)\s+', re.IGNORECASE | re.MULTILINE), '<prompt_injection_removed: command_injection>'),
+    # 12. jailbreak_attempt
+    (re.compile(r'\bDAN\b|developer mode|fictional[- ]framing|jailbreak', re.IGNORECASE), '<prompt_injection_removed: jailbreak_attempt>'),
+]
+
+
+def _ai_app_sec_070_sanitize(text: str) -> str:
+    """Neutralize prompt injection patterns in user-supplied text."""
+    for pattern, marker in _ai_app_sec_070_patterns:
+        text = pattern.sub(marker, text)
+    return text
+
+_AI_APP_SEC_059_SHELL_PATTERNS = re.compile(
+    r"(?:"
+    r"\b(?:bash|sh|zsh|cmd|powershell|exec|eval|system|popen|subprocess)\s*[\(\[\{\s]"
+    r"|(?:^|\s)[`$]\("  # command substitution
+    r"|\|\s*(?:bash|sh|cmd)"
+    r"|;\s*(?:rm|wget|curl|chmod|chown|nc|ncat|netcat|python|perl|ruby)\b"
+    r"|\\x[0-9a-fA-F]{2}"
+    r"|\\u[0-9a-fA-F]{4}"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_AI_APP_SEC_059_CRED_PATTERNS = re.compile(
+    r"(?:"
+    r"(?:password|passwd|secret|token|api[_\-]?key|auth[_\-]?token|credential|private[_\-]?key)"
+    r"\s*[=:]"
+    r"|Bearer\s+[A-Za-z0-9\-._~+/]+=*"
+    r")",
+    re.IGNORECASE,
+)
+
+_AI_APP_SEC_059_LEET_PATTERN = re.compile(
+    r"(?:[3][xX][3][cC]|[3][vV][4][lL]|[5][yY][5][tT][3][mM]|[Ss][Hh][3][Ll][Ll])"
+)
+
+_AI_APP_SEC_059_INVISIBLE_PATTERN = re.compile(
+    r"[\u200b\u200c\u200d\u2060\ufeff\u00ad]"
+)
+
+
+def _ai_app_sec_059_is_base64_payload(text: str) -> bool:
+    """Return True if text contains a suspicious base64-encoded block."""
+    # Look for base64 strings long enough to encode a command (>= 20 chars)
+    b64_candidates = re.findall(r"[A-Za-z0-9+/]{20,}={0,2}", text)
+    for candidate in b64_candidates:
+        try:
+            decoded = base64.b64decode(candidate + "==").decode("utf-8", errors="ignore")
+            if _AI_APP_SEC_059_SHELL_PATTERNS.search(decoded) or _AI_APP_SEC_059_CRED_PATTERNS.search(decoded):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _ai_app_sec_059_check_prompt(text: str) -> str:
+    """Check prompt text for hidden, encoded, or malicious content.
+
+    Raises ValueError if suspicious content is detected.
+    Returns the original text if it passes all checks.
+    """
+    if not isinstance(text, str):
+        return text
+
+    if _AI_APP_SEC_059_INVISIBLE_PATTERN.search(text):
+        raise ValueError(
+            "Prompt rejected: invisible/hidden characters detected."
+        )
+
+    if _AI_APP_SEC_059_SHELL_PATTERNS.search(text):
+        raise ValueError(
+            "Prompt rejected: potential shell command or code execution pattern detected."
+        )
+
+    if _AI_APP_SEC_059_CRED_PATTERNS.search(text):
+        raise ValueError(
+            "Prompt rejected: potential credential or secret access pattern detected."
+        )
+
+    if _AI_APP_SEC_059_LEET_PATTERN.search(text):
+        raise ValueError(
+            "Prompt rejected: leetspeak obfuscation of dangerous keywords detected."
+        )
+
+    if _ai_app_sec_059_is_base64_payload(text):
+        raise ValueError(
+            "Prompt rejected: base64-encoded malicious content detected."
+        )
+
+    return text
+
+_AI_APP_SEC_006_DISAPPROVED_PATTERNS = [
+    "deepseekr1distillallama70b",
+    "deepseekr1",
+    "deepseekreasoner",
+    "deepseekrchat",
+    "deepseek",
+    "customllmclientnull",
+    "openrouternull",
+    "usdeepseekr1v10null",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model identifier for comparison."""
+    import re
+    return re.sub(r"[\s\-_\.:\"']", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(llm: "LLMEndpoint") -> None:
+    """Raise ValueError if the LLMEndpoint uses a disapproved model."""
+    try:
+        model_id = llm._llm.model_name if hasattr(llm._llm, "model_name") else ""
+        if not model_id:
+            model_id = getattr(llm._llm, "model", "") or ""
+    except Exception:
+        model_id = ""
+    normalized = _ai_app_sec_006_normalize(model_id)
+    for pattern in _AI_APP_SEC_006_DISAPPROVED_PATTERNS:
+        if pattern in normalized:
+            raise ValueError(
+                f"Model '{model_id}' is on the organization's disapproved list and cannot be used."
+            )
+
 langfuse_service = LangfuseService()
 langfuse_handler = langfuse_service.get_handler()
 
@@ -62,6 +211,7 @@ class QuivrQARAG:
     ):
         self.retrieval_config = retrieval_config
         self.vector_store = vector_store
+        _ai_app_sec_006_check_model(llm)
         self.llm_endpoint = llm
         self.reranker = reranker if reranker is not None else IdempotentCompressor()
 
@@ -172,6 +322,8 @@ class QuivrQARAG:
             list_files, self.retrieval_config.max_files
         )
         conversational_qa_chain = self.build_chain(concat_list_files)
+        question = _ai_app_sec_059_check_prompt(question)
+        question = _ai_app_sec_070_sanitize(question)
         raw_llm_response = conversational_qa_chain.invoke(
             {
                 "question": question,
@@ -205,6 +357,8 @@ class QuivrQARAG:
         prev_answer = ""
         chunk_id = 0
 
+        question = _ai_app_sec_059_check_prompt(question)
+        question = _ai_app_sec_070_sanitize(question)
         async for chunk in conversational_qa_chain.astream(
             {
                 "question": question,

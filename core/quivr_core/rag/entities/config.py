@@ -20,6 +20,31 @@ logger = logging.getLogger("quivr_core")
 MIN_CONTEXT_TOKENS = 4096
 MIN_OUTPUT_TOKENS = 4096
 
+# Disapproved model identifiers per organization registry (case-insensitive, ignoring spaces/-/_/.:)
+_AI_APP_SEC_006_DISAPPROVED_PATTERNS = [
+    "deepseekchat",
+    "deepseekr1distillllama70b",
+    "deepseekr1",
+    "deepseekreasoner",
+    "openrouter",
+    "usdeepseekr1v10",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model name for registry comparison."""
+    return re.sub(r"[\s\-_\.:\u003a]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(model: str) -> None:
+    """Raise ValueError if the model is on the organization's disapproved list."""
+    normalized = _ai_app_sec_006_normalize(model)
+    for pattern in _AI_APP_SEC_006_DISAPPROVED_PATTERNS:
+        if pattern in normalized:
+            raise ValueError(
+                f"Model '{model}' is on the organization's disapproved model list and cannot be used."
+            )
+
 
 def normalize_to_env_variable_name(name: str) -> str:
     # Replace any character that is not a letter, digit, or underscore with an underscore
@@ -343,6 +368,7 @@ class LLMEndpointConfig(QuivrBaseConfig):
 
     def __init__(self, **data):
         super().__init__(**data)
+        _ai_app_sec_006_check_model(self.model)
         self.set_llm_model_config()
         self.set_api_key()
 

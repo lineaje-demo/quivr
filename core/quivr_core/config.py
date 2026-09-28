@@ -1,7 +1,8 @@
+import re
 from enum import Enum
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class ParserType(str, Enum):
@@ -31,9 +32,37 @@ class MegaparseBaseConfig(BaseModel):
         return cls(**config_data)
 
 
+_ai_app_sec_006_DISAPPROVED_PATTERNS = [
+    "deepseek",
+    "customllmclient",
+    "openrouter",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model identifier for registry comparison."""
+    return re.sub(r"[\s\-_\.:\u0000-\u001f]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(model_name: str) -> str:
+    """Raise ValueError if model_name matches a disapproved model."""
+    normalized = _ai_app_sec_006_normalize(model_name)
+    for pattern in _ai_app_sec_006_DISAPPROVED_PATTERNS:
+        if pattern in normalized:
+            raise ValueError(
+                f"Model '{model_name}' is not approved for use by this organization."
+            )
+    return model_name
+
+
 class MegaparseConfig(MegaparseBaseConfig):
     method: ParserType = ParserType.UNSTRUCTURED
     strategy: StrategyEnum = StrategyEnum.FAST
     check_table: bool = False
     parsing_instruction: str | None = None
     model_name: str = "gpt-4o"
+
+    @field_validator("model_name")
+    @classmethod
+    def _ai_app_sec_006_validate_model_name(cls, v: str) -> str:
+        return _ai_app_sec_006_check_model(v)

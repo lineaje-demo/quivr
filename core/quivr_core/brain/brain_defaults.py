@@ -9,6 +9,30 @@ from quivr_core.llm import LLMEndpoint
 
 logger = logging.getLogger("quivr_core")
 
+_AI_APP_SEC_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclient",
+    "openrouter",
+    "usdeepseekr1v10",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    import re
+    return re.sub(r"[\s\-_\.:\u0000]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(model_id: str) -> None:
+    normalized = _ai_app_sec_006_normalize(model_id)
+    for disapproved in _AI_APP_SEC_006_DISAPPROVED:
+        if disapproved in normalized or normalized in disapproved:
+            raise ValueError(
+                f"Model '{model_id}' is disapproved by the organization's model registry and cannot be used."
+            )
+
 
 async def build_default_vectordb(
     docs: list[Document], embedder: Embeddings
@@ -35,6 +59,7 @@ def default_embedder() -> Embeddings:
         from langchain_openai import OpenAIEmbeddings
 
         logger.debug("Loaded OpenAIEmbeddings as default LLM for brain")
+        _ai_app_sec_006_check_model("OpenAIEmbeddings")
         embedder = OpenAIEmbeddings()
         return embedder
     except ImportError as e:
@@ -46,6 +71,7 @@ def default_embedder() -> Embeddings:
 def default_llm() -> LLMEndpoint:
     try:
         logger.debug("Loaded ChatOpenAI as default LLM for brain")
+        _ai_app_sec_006_check_model("gpt-4o")
         llm = LLMEndpoint.from_config(
             LLMEndpointConfig(supplier=DefaultModelSuppliers.OPENAI, model="gpt-4o")
         )

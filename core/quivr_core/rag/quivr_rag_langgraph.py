@@ -1,5 +1,30 @@
 import asyncio
 import datetime
+import re
+
+_ai_app_sec_070_patterns = [
+    (re.compile(r'(?i)(ignore\s+previous\s+instructions|forget\s+everything\s+above)'), '<prompt_injection_removed: instruction_override>'),
+    (re.compile(r'(?i)(you\s+are\s+now\s+DAN|act\s+as\s+unrestricted)'), '<prompt_injection_removed: role_hijack>'),
+    (re.compile(r'(?i)</?\s*system\s*>'), '<prompt_injection_removed: delimiter_escape>'),
+    (re.compile(r'(?i)\b((?:[A-Za-z0-9+/]{4}){4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)\b'), '<prompt_injection_removed: encoded_payload>'),
+    (re.compile(r'(?i)(<!--.*?-->|\u200b|\u200c|\u200d|\ufeff)', re.DOTALL), '<prompt_injection_removed: hidden_text>'),
+    (re.compile(r'(?i)(\[system\]|\[tool\]|<tool_response>)'), '<prompt_injection_removed: fake_system_message>'),
+    (re.compile(r'(?i)(\!\[.*?\]\(https?://[^)]+\)|send.*?to\s+https?://|leak.*?system\s+prompt)'), '<prompt_injection_removed: exfiltration_attempt>'),
+    (re.compile(r'(?i)(manipulate\s+context|multi.?turn\s+manipulation|poison.*?context)'), '<prompt_injection_removed: context_poisoning>'),
+    (re.compile(r'(?i)(payload\s+in\s+(file|data|metadata|comment))'), '<prompt_injection_removed: indirect_injection>'),
+    (re.compile(r'(?i)(\$\(|`[^`]*`|;\s*rm\s|;\s*curl\s|;\s*wget\s|\|\s*bash|eval\s*\()'), '<prompt_injection_removed: command_injection>'),
+    (re.compile(r'(?i)(split.*?payload|fragmented.*?instruction)'), '<prompt_injection_removed: split_payload>'),
+    (re.compile(r'(?i)(DAN\s+mode|developer\s+mode\s+enabled|fictional\s+framing\s+bypass|jailbreak)'), '<prompt_injection_removed: jailbreak_attempt>'),
+]
+
+
+def _ai_app_sec_070_sanitize(text: str) -> str:
+    """Sanitize user input to remove prompt injection attempts."""
+    if not isinstance(text, str):
+        return text
+    for pattern, marker in _ai_app_sec_070_patterns:
+        text = pattern.sub(marker, text)
+    return text
 import logging
 from collections import OrderedDict
 from typing import (
@@ -16,7 +41,55 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
+import re
 import openai
+import re
+import base64
+
+_AI_APP_SEC_059_SHELL_PATTERN = re.compile(
+    r"(?:\/bin\/(?:sh|bash|zsh|dash)|subprocess|os\.system|exec\s*\(|eval\s*\("
+    r"|`[^`]+`|\$\([^)]+\)|\bpowershell\b|\bcmd\.exe\b|\bwget\b|\bcurl\b"
+    r"|\bnc\b|\bnetcat\b|\bchmod\b|\bchown\b|\brm\s+-rf)",
+    re.IGNORECASE,
+)
+_AI_APP_SEC_059_CRED_PATTERN = re.compile(
+    r"(?:password|passwd|secret|api[_\-]?key|auth[_\-]?token|bearer\s+[A-Za-z0-9\-._~+/]+=*"
+    r"|access[_\-]?token|private[_\-]?key|credentials)",
+    re.IGNORECASE,
+)
+_AI_APP_SEC_059_B64_PATTERN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+_AI_APP_SEC_059_LEET_PATTERN = re.compile(r"(?:[3@][xX][3e][cC]|[3@][vV][4a][lL]|[1i][gG][nN][0o][rR][3e])")
+_AI_APP_SEC_059_INVISIBLE_PATTERN = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+_AI_APP_SEC_059_BINARY_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _ai_app_sec_059_check_prompt(prompt: str) -> str:
+    """Check prompt for hidden, encoded, shell, or malicious content.
+
+    Raises ValueError if suspicious content is detected.
+    Returns the prompt unchanged if it passes all checks.
+    """
+    if not isinstance(prompt, str):
+        return prompt
+    if _AI_APP_SEC_059_INVISIBLE_PATTERN.search(prompt):
+        raise ValueError("Prompt contains invisible or hidden Unicode characters.")
+    if _AI_APP_SEC_059_BINARY_PATTERN.search(prompt):
+        raise ValueError("Prompt contains binary or control characters.")
+    if _AI_APP_SEC_059_SHELL_PATTERN.search(prompt):
+        raise ValueError("Prompt contains shell commands or executable content.")
+    if _AI_APP_SEC_059_CRED_PATTERN.search(prompt):
+        raise ValueError("Prompt attempts to access credentials or secrets.")
+    if _AI_APP_SEC_059_LEET_PATTERN.search(prompt):
+        raise ValueError("Prompt contains leetspeak-encoded suspicious content.")
+    for match in _AI_APP_SEC_059_B64_PATTERN.finditer(prompt):
+        try:
+            decoded = base64.b64decode(match.group() + "==").decode("utf-8", errors="ignore")
+            if _AI_APP_SEC_059_SHELL_PATTERN.search(decoded) or _AI_APP_SEC_059_CRED_PATTERN.search(decoded):
+                raise ValueError("Prompt contains base64-encoded malicious content.")
+        except Exception as exc:
+            if "Prompt contains" in str(exc):
+                raise
+    return prompt
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_cohere import CohereRerank
 from langchain_community.document_compressors import JinaRerank
@@ -55,6 +128,40 @@ from quivr_core.rag.utils import (
 )
 
 logger = logging.getLogger("quivr_core")
+
+_AI_APP_SEC_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclient",
+    "openrouter",
+    "usdeepseekr1v10",
+]
+
+
+def _ai_app_sec_006_normalize(model_id: str) -> str:
+    """Normalize a model identifier for comparison."""
+    return re.sub(r"[\s\-_\.:\u0000]+", "", model_id).lower()
+
+
+def _ai_app_sec_006_check_model(llm_endpoint: "LLMEndpoint") -> None:
+    """Raise ValueError if the endpoint's model is on the disapproved list."""
+    try:
+        model_id = llm_endpoint._llm.model_name  # type: ignore[attr-defined]
+    except AttributeError:
+        try:
+            model_id = llm_endpoint._llm.model  # type: ignore[attr-defined]
+        except AttributeError:
+            model_id = ""
+    if not model_id:
+        return
+    normalized = _ai_app_sec_006_normalize(str(model_id))
+    for disapproved in _AI_APP_SEC_006_DISAPPROVED:
+        if disapproved in normalized or normalized in disapproved:
+            raise ValueError(
+                f"Model '{model_id}' is on the organization's disapproved list and cannot be used."
+            )
 
 langfuse_service = LangfuseService()
 langfuse_handler = langfuse_service.get_handler()
@@ -924,7 +1031,7 @@ class QuivrQARAGLangGraph:
         tasks = state["tasks"]
         docs: List[Document] = tasks.docs if tasks else []
         messages = state["messages"]
-        user_task = messages[0].content
+        user_task = _ai_app_sec_070_sanitize(messages[0].content)
         prompt_template: BasePromptTemplate = custom_prompts[
             TemplatePromptName.ZENDESK_TEMPLATE_PROMPT
         ]
@@ -1172,9 +1279,10 @@ class QuivrQARAGLangGraph:
                         return node.name
         return ""
 
-    async def ainvoke_structured_output(
+        async def ainvoke_structured_output(
         self, prompt: str, output_class: Type[BaseModel]
     ) -> Any:
+        prompt = _ai_app_sec_059_check_prompt(prompt)
         try:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 output_class, method="json_schema"
@@ -1183,10 +1291,15 @@ class QuivrQARAGLangGraph:
         except openai.BadRequestError:
             structured_llm = self.llm_endpoint._llm.with_structured_output(output_class)
             return await structured_llm.ainvoke(prompt)
+        except openai.BadRequestError:
+            _ai_app_sec_006_check_model(self.llm_endpoint)
+            structured_llm = self.llm_endpoint._llm.with_structured_output(output_class)
+            return await structured_llm.ainvoke(prompt)
 
     def invoke_structured_output(
         self, prompt: str, output_class: Type[BaseModel]
     ) -> Any:
+        prompt = _ai_app_sec_059_check_prompt(prompt)
         try:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 output_class, method="json_schema"

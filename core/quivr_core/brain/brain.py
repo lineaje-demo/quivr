@@ -43,6 +43,40 @@ from .brain_defaults import build_default_vectordb, default_embedder, default_ll
 
 logger = logging.getLogger("quivr_core")
 
+_AI_APP_SEC_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclient",
+    "deepseekchаt",
+    "openrouter",
+    "usdeepseekr1v10",
+]
+
+
+def _ai_app_sec_006_normalize(model_id: str) -> str:
+    """Normalize a model identifier for comparison."""
+    import re
+    return re.sub(r"[\s\-_\.:\u0000-\u001f]", "", model_id).lower()
+
+
+def _ai_app_sec_006_check_llm_endpoint(llm: "LLMEndpoint") -> None:
+    """Raise ValueError if the LLMEndpoint uses a disapproved model."""
+    try:
+        model_id = llm.llm.model_name if hasattr(llm.llm, "model_name") else ""
+        if not model_id:
+            model_id = llm.llm.model if hasattr(llm.llm, "model") else ""
+    except Exception:
+        model_id = ""
+    normalized = _ai_app_sec_006_normalize(str(model_id))
+    for disapproved in _AI_APP_SEC_006_DISAPPROVED:
+        if disapproved in normalized or normalized in disapproved and normalized:
+            raise ValueError(
+                f"Model '{model_id}' is not approved for use in this organization. "
+                f"It matches a disapproved model: {disapproved}"
+            )
+
 
 async def process_files(
     storage: StorageBase, skip_file_error: bool, **processor_kwargs: dict[str, Any]
@@ -130,6 +164,7 @@ class Brain:
         self.default_chat = list(self._chats.values())[0]
 
         # RAG dependencies:
+        _ai_app_sec_006_check_llm_endpoint(llm)
         self.llm = llm
         self.vector_db = vector_db
         self.embedder = embedder
@@ -200,7 +235,7 @@ class Brain:
             id=bserialized.id,
             name=bserialized.name,
             embedder=embedder,
-            llm=LLMEndpoint.from_config(bserialized.llm_config),
+            llm=_ai_app_sec_006_check_llm_endpoint(LLMEndpoint.from_config(bserialized.llm_config)) or LLMEndpoint.from_config(bserialized.llm_config),
             storage=storage,
             vector_db=vector_db,
         )

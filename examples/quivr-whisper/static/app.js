@@ -307,6 +307,70 @@ class RecordingHandler {
   }
 }
 
+const _ai_dat_sec_023_patterns = [
+  // Social Security Number
+  /\b\d{3}-\d{2}-\d{4}\b/g,
+  // Year of Birth (standalone 4-digit year 1900-2099)
+  /\b(19|20)\d{2}\b/g,
+  // Birthplace (born in <location>)
+  /\bborn\s+in\s+[A-Za-z\s,]+/gi,
+  // Personal Phone Number
+  /\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+  // Email
+  /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g,
+  // Mother's Maiden Name
+  /\bmother'?s?\s+maiden\s+name\s*[:\-]?\s*[A-Za-z]+/gi,
+  // Home Address (number + street)
+  /\b\d{1,5}\s+[A-Za-z0-9\s,.'\-]+(Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b/gi,
+  // Passport Number
+  /\b[A-Z]{1,2}\d{6,9}\b/g,
+  // Driver's License Number
+  /\b[A-Z]{1,2}\d{5,8}\b/g,
+  // Taxpayer Identification Number
+  /\b\d{2}-\d{7}\b/g,
+  // Credit Card Number
+  /\b(?:\d[ -]?){13,16}\b/g,
+  // Financial Account Number (8-17 digit sequences)
+  /\b\d{8,17}\b/g,
+  // Vehicle Identification Number
+  /\b[A-HJ-NPR-Z0-9]{17}\b/g,
+  // IP Address
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+  // MAC Address
+  /\b([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b/g,
+  // Fine Location (GPS coordinates)
+  /\b-?\d{1,3}\.\d{4,}\s*,\s*-?\d{1,3}\.\d{4,}\b/g,
+  // Ethnicity keywords
+  /\b(ethnicity|race)\s*[:\-]?\s*[A-Za-z\s]+/gi,
+  // Sexual Orientation keywords
+  /\b(sexual\s+orientation)\s*[:\-]?\s*[A-Za-z\s]+/gi,
+  // Medical Records keywords
+  /\b(diagnosis|medical\s+record|patient\s+id|prescription)\s*[:\-]?\s*[A-Za-z0-9\s]+/gi,
+  // Employee ID
+  /\b(employee\s+id|emp\s*id)\s*[:\-]?\s*[A-Za-z0-9\-]+/gi,
+  // School ID
+  /\b(school\s+id|student\s+id)\s*[:\-]?\s*[A-Za-z0-9\-]+/gi,
+];
+
+function _ai_dat_sec_023_redact(text) {
+  let redacted = text;
+  for (const pattern of _ai_dat_sec_023_patterns) {
+    redacted = redacted.replace(pattern, "[REDACTED]");
+  }
+  return redacted;
+}
+
+async function _ai_dat_sec_023_sanitizeFile(file) {
+  try {
+    const text = await file.text();
+    const redacted = _ai_dat_sec_023_redact(text);
+    return new File([redacted], file.name, { type: file.type });
+  } catch (e) {
+    // If file cannot be read as text (e.g. binary), return original
+    return file;
+  }
+}
+
 const uploadFile = async (e) => {
   uploadBtn.innerText = "Uploading File...";
   e.preventDefault();
@@ -316,8 +380,9 @@ const uploadFile = async (e) => {
     alert("Please select a file.");
     return;
   }
+  const sanitizedFile = await _ai_dat_sec_023_sanitizeFile(file);
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append("file", sanitizedFile);
   try {
     await fetch("/upload", {
       method: "POST",

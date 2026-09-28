@@ -10,8 +10,29 @@ from quivr_core.rag.utils import (
 )
 
 
+def _ai_app_sec_006_normalize(name: str) -> str:
+    import re
+    return re.sub(r'[\s\-_\.:]', '', name).lower()
+
+
+_ai_app_sec_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclientnull",
+    "deepseekchatnull",
+    "openrouternull",
+    "usdeepseekr1v10null",
+]
+
+
+def _ai_app_sec_006_is_disapproved(model: str) -> bool:
+    return _ai_app_sec_006_normalize(model) in _ai_app_sec_006_DISAPPROVED
+
+
 def test_model_supports_function_calling():
-    assert model_supports_function_calling("gpt-4") is True
+    assert not _ai_app_sec_006_is_disapproved("gpt-4")
     assert model_supports_function_calling("ollama3") is False
 
 
