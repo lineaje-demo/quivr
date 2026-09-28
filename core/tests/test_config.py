@@ -1,4 +1,26 @@
+import re
 from quivr_core.rag.entities.config import LLMEndpointConfig, RetrievalConfig
+
+_AI_APP_SEC_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclientnull",
+    "deepseekchatnull",
+    "openrouternull",
+    "usdeepseekr1v10null",
+]
+
+
+def _ai_app_sec_006_check_model(model: str) -> str:
+    """Raise ValueError if model is on the organisation's disapproved list."""
+    normalised = re.sub(r"[\s\-_\.:\u0000]", "", model).lower()
+    if normalised in _AI_APP_SEC_006_DISAPPROVED:
+        raise ValueError(
+            f"Model '{model}' is on the organisation's disapproved list and may not be used."
+        )
+    return model
 
 
 def test_default_llm_config():
@@ -7,7 +29,7 @@ def test_default_llm_config():
     assert (
         config.model_dump()
         == LLMEndpointConfig(
-            model="gpt-4o",
+            model=_ai_app_sec_006_check_model("gpt-4o"),
             llm_base_url=None,
             llm_api_key=None,
             max_context_tokens=2000,
