@@ -1,4 +1,5 @@
 import hashlib
+import re
 import mimetypes
 import os
 import warnings
@@ -10,6 +11,59 @@ from uuid import UUID, uuid4
 
 import aiofiles
 from openai import BaseModel
+
+# PII patterns for zero-tolerance categories
+_ai_dat_sec_023_patterns = [
+    # Social Security Number
+    (re.compile(r'\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'), '[REDACTED_SSN]'),
+    # Taxpayer Identification Number (EIN format)
+    (re.compile(r'\b\d{2}-\d{7}\b'), '[REDACTED_TIN]'),
+    # Credit Card Number (Visa, MC, Amex, Discover)
+    (re.compile(r'\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b'), '[REDACTED_CC]'),
+    # Financial Account Number (generic 8-17 digit)
+    (re.compile(r'\bACCT\s*#?\s*\d{8,17}\b', re.IGNORECASE), '[REDACTED_FINANCIAL_ACCOUNT]'),
+    # Passport Number (US format)
+    (re.compile(r'\b[A-Z]{1,2}[0-9]{6,9}\b'), '[REDACTED_PASSPORT]'),
+    # Driver License Number (generic alphanumeric 6-15)
+    (re.compile(r'\bDL\s*#?\s*[A-Z0-9]{6,15}\b', re.IGNORECASE), '[REDACTED_DL]'),
+    # Vehicle Identification Number
+    (re.compile(r'\b[A-HJ-NPR-Z0-9]{17}\b'), '[REDACTED_VIN]'),
+    # IP Address (v4)
+    (re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'), '[REDACTED_IP]'),
+    # MAC Address
+    (re.compile(r'\b(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b'), '[REDACTED_MAC]'),
+    # Email
+    (re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'), '[REDACTED_EMAIL]'),
+    # Personal Phone Number
+    (re.compile(r'\b(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b'), '[REDACTED_PHONE]'),
+    # Year of Birth (context-based)
+    (re.compile(r'\b(?:born|dob|date of birth|birth year)[:\s]+(?:19|20)\d{2}\b', re.IGNORECASE), '[REDACTED_YOB]'),
+    # Home Address (street address pattern)
+    (re.compile(r'\b\d{1,5}\s+[A-Za-z0-9\s]{3,30}(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b', re.IGNORECASE), '[REDACTED_ADDRESS]'),
+    # Employee ID
+    (re.compile(r'\b(?:EMP|EMPLOYEE)\s*#?\s*[A-Z0-9]{4,12}\b', re.IGNORECASE), '[REDACTED_EMPLOYEE_ID]'),
+    # School ID
+    (re.compile(r'\b(?:STUDENT|SCHOOL)\s*ID\s*#?\s*[A-Z0-9]{4,12}\b', re.IGNORECASE), '[REDACTED_SCHOOL_ID]'),
+    # Mother's Maiden Name (context-based)
+    (re.compile(r"\b(?:mother'?s?\s+maiden\s+name)[:\s]+[A-Za-z\-']{2,30}\b", re.IGNORECASE), '[REDACTED_MAIDEN_NAME]'),
+    # Birthplace (context-based)
+    (re.compile(r'\b(?:birthplace|place of birth|born in)[:\s]+[A-Za-z\s,]{2,50}\b', re.IGNORECASE), '[REDACTED_BIRTHPLACE]'),
+    # Ethnicity (context-based)
+    (re.compile(r'\b(?:ethnicity|ethnic origin|race)[:\s]+[A-Za-z\s]{2,30}\b', re.IGNORECASE), '[REDACTED_ETHNICITY]'),
+    # Sexual Orientation (context-based)
+    (re.compile(r'\b(?:sexual orientation|sexuality)[:\s]+[A-Za-z\s]{2,30}\b', re.IGNORECASE), '[REDACTED_SEXUAL_ORIENTATION]'),
+]
+
+
+def _ai_dat_sec_023_redact_pii(content: bytes) -> bytes:
+    """Detect and redact PII from file content bytes."""
+    try:
+        text = content.decode('utf-8', errors='replace')
+    except Exception:
+        return content
+    for pattern, replacement in _ai_dat_sec_023_patterns:
+        text = pattern.sub(replacement, text)
+    return text.encode('utf-8', errors='replace')
 
 
 class QuivrFileSerialized(BaseModel):
@@ -76,7 +130,11 @@ async def load_qfile(brain_id: UUID, path: str | Path):
     file_size = os.stat(path).st_size
 
     async with aiofiles.open(path, mode="rb") as f:
-        file_sha1 = hashlib.sha1(await f.read()).hexdigest()
+        raw_content = await f.read()
+    redacted_content = _ai_dat_sec_023_redact_pii(raw_content)
+    async with aiofiles.open(path, mode="wb") as f:
+        await f.write(redacted_content)
+    file_sha1 = hashlib.sha1(redacted_content).hexdigest()
 
     try:
         # NOTE: when loading from existing storage, file name will be uuid
