@@ -1,5 +1,11 @@
 import logging
+import re
 from typing import Any, Dict, List, Tuple, no_type_check
+
+from lineaje_guardrail import lineaje_guardrail
+
+_ai_app_sec_059_guardrail = lineaje_guardrail()
+_ai_app_sec_059_guardrail.enable_policies(["AI_APP_SEC_059.json"])
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import AIMessageChunk
@@ -22,8 +28,93 @@ from quivr_core.rag.prompts import TemplatePromptName, custom_prompts
 
 logger = logging.getLogger("quivr_core")
 
+_ai_app_sec_070_patterns: List[Tuple[re.Pattern, str]] = [
+    # 1. instruction_override
+    (re.compile(
+        r'ignore\s+(?:all\s+)?previous\s+instructions|forget\s+everything\s+above',
+        re.IGNORECASE), '<prompt_injection_removed: instruction_override>'),
+    # 2. role_hijack
+    (re.compile(
+        r'you\s+are\s+now\s+DAN|act\s+as\s+(?:an?\s+)?unrestricted',
+        re.IGNORECASE), '<prompt_injection_removed: role_hijack>'),
+    # 3. delimiter_escape - fake </system>, </user>, </assistant> tags or injected separators
+    (re.compile(
+        r'</\s*(?:system|user|assistant|prompt|context|instruction)\s*>|<\s*(?:system|user|assistant|prompt|context|instruction)\s*>',
+        re.IGNORECASE), '<prompt_injection_removed: delimiter_escape>'),
+    # 4. encoded_payload - base64 blobs, hex sequences, ROT13 cues, URL-encoded instructions
+    (re.compile(
+        r'(?:base64|hex|rot13|leetspeak|morse|url.?encod)\s*(?:decode|encode|:)',
+        re.IGNORECASE), '<prompt_injection_removed: encoded_payload>'),
+    # 5. hidden_text - HTML comments, zero-width chars, CSS hidden
+    (re.compile(
+        r'<!--.*?-->|[\u200b-\u200f\u202a-\u202e\u2060\ufeff]|display\s*:\s*none',
+        re.IGNORECASE | re.DOTALL), '<prompt_injection_removed: hidden_text>'),
+    # 6. fake_system_message
+    (re.compile(
+        r'\[\s*(?:system|tool|assistant)\s*\]|<<\s*(?:system|tool)\s*>>|<\|\s*(?:system|tool)\s*\|>',
+        re.IGNORECASE), '<prompt_injection_removed: fake_system_message>'),
+    # 7. exfiltration_attempt - markdown image exfil, send/leak data to URLs
+    (re.compile(
+        r'!\[.*?\]\(https?://[^)]*\?[^)]*\)|(?:send|leak|exfiltrate|transmit)\s+(?:the\s+)?(?:system\s+prompt|data|context)\s+to\s+https?://',
+        re.IGNORECASE), '<prompt_injection_removed: exfiltration_attempt>'),
+    # 8. context_poisoning
+    (re.compile(
+        r'context\s+poison(?:ing)?|multi.?turn\s+manipulat',
+        re.IGNORECASE), '<prompt_injection_removed: context_poisoning>'),
+    # 9. indirect_injection - payloads in metadata/data fields
+    (re.compile(
+        r'indirect\s+injection|payload\s+in\s+(?:file|data|metadata)',
+        re.IGNORECASE), '<prompt_injection_removed: indirect_injection>'),
+    # 10. command_injection - shell/code execution
+    (re.compile(
+        r'(?:^|\s)(?:eval|exec|os\.system|subprocess\.(?:call|run|Popen)|shell=True)\s*\(',
+        re.IGNORECASE | re.MULTILINE), '<prompt_injection_removed: command_injection>'),
+    # 11. split_payload - fragmented instructions
+    (re.compile(
+        r'(?:split|fragment(?:ed)?)\s+payload|continue\s+(?:the\s+)?(?:previous\s+)?instruction',
+        re.IGNORECASE), '<prompt_injection_removed: split_payload>'),
+    # 12. jailbreak_attempt - DAN, developer mode, fictional framing
+    (re.compile(
+        r'\bDAN\b|developer\s+mode\s+enabled|fictional\s+(?:framing|scenario)\s+(?:to\s+)?bypass|jailbreak',
+        re.IGNORECASE), '<prompt_injection_removed: jailbreak_attempt>'),
+]
+
+
+def _ai_app_sec_070_sanitize(text: str) -> str:
+    """Neutralize prompt injection patterns in user-supplied text before LLM handoff."""
+    for pattern, marker in _ai_app_sec_070_patterns:
+        text = pattern.sub(marker, text)
+    return text
+
+_AI_APP_SEC_006_DISAPPROVED_PATTERNS: list[str] = [
+    "deepseekr1distillama70b",
+    "deepseekr1",
+    "deepseekreasoner",
+    "deepseek",
+    "customllmclient",
+    "openrouter",
+    "usdeepseekr1v10",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model name for registry comparison."""
+    import re
+    return re.sub(r"[\s\-_\.:\u0000]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(model_name: str) -> None:
+    """Raise ValueError if model_name matches a disapproved model."""
+    normalized = _ai_app_sec_006_normalize(model_name)
+    for pattern in _AI_APP_SEC_006_DISAPPROVED_PATTERNS:
+        if pattern in normalized:
+            raise ValueError(
+                f"Model '{model_name}' is not permitted by the organization's model registry."
+            )
+
 
 def model_supports_function_calling(model_name: str):
+    _ai_app_sec_006_check_model(model_name)
     models_not_supporting_function_calls: list[str] = ["llama2", "test", "ollama3"]
 
     return model_name not in models_not_supporting_function_calls
@@ -35,10 +126,10 @@ def format_history_to_openai_mesages(
     """Format the chat history into a list of Base Messages"""
     messages = []
     messages.append(SystemMessage(content=system_message))
-    for human, ai in tuple_history:
-        messages.append(HumanMessage(content=human))
+        for human, ai in tuple_history:
+        messages.append(HumanMessage(content=_ai_app_sec_070_sanitize(human)))
         messages.append(AIMessage(content=ai))
-    messages.append(HumanMessage(content=question))
+    messages.append(HumanMessage(content=_ai_app_sec_070_sanitize(question)))
     return messages
 
 
