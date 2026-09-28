@@ -9,6 +9,30 @@ from quivr_core.llm import LLMEndpoint
 
 logger = logging.getLogger("quivr_core")
 
+import re as _re
+
+_AI_APP_SEC_006_DISAPPROVED = [
+    "deepseekchat",
+    "deepseekr1",
+    "deepseekr1distillllama70b",
+    "deepseekreasoner",
+    "customllmclientnull",
+    "deepseekchatnull",
+    "openrouternull",
+    "usdeepseekr1v10null",
+]
+
+
+def _ai_app_sec_006_check_model(model: str) -> None:
+    """Raise ValueError if the model is in the organisation's disapproved list."""
+    normalized = _re.sub(r"[\s\-_\.:\u0000]", "", model).lower()
+    for disapproved in _AI_APP_SEC_006_DISAPPROVED:
+        if normalized == disapproved:
+            raise ValueError(
+                f"Model '{model}' is disapproved by the organisation's model registry and cannot be used."
+            )
+
+
 
 async def build_default_vectordb(
     docs: list[Document], embedder: Embeddings
@@ -46,6 +70,7 @@ def default_embedder() -> Embeddings:
 def default_llm() -> LLMEndpoint:
     try:
         logger.debug("Loaded ChatOpenAI as default LLM for brain")
+        _ai_app_sec_006_check_model("gpt-4o")
         llm = LLMEndpoint.from_config(
             LLMEndpointConfig(supplier=DefaultModelSuppliers.OPENAI, model="gpt-4o")
         )

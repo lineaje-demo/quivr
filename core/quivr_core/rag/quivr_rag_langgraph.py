@@ -1,5 +1,30 @@
 import asyncio
 import datetime
+import re
+
+_ai_app_sec_070_patterns = [
+    (re.compile(r'ignore\s+previous\s+instructions|forget\s+everything\s+above', re.IGNORECASE), '<prompt_injection_removed: instruction_override>'),
+    (re.compile(r'you\s+are\s+now\s+DAN|act\s+as\s+unrestricted', re.IGNORECASE), '<prompt_injection_removed: role_hijack>'),
+    (re.compile(r'</?(system|tool|assistant|user)>', re.IGNORECASE), '<prompt_injection_removed: delimiter_escape>'),
+    (re.compile(r'(?:[A-Za-z0-9+/]{20,}={0,2}|(?:\\x[0-9a-fA-F]{2}){4,}|(?:%[0-9a-fA-F]{2}){4,})', re.IGNORECASE), '<prompt_injection_removed: encoded_payload>'),
+    (re.compile(r'<!--.*?-->|\u200b|\u200c|\u200d|\u2060|\ufeff|<[^>]+style\s*=\s*["\'][^"\'>]*display\s*:\s*none[^"\'>]*["\'][^>]*>', re.IGNORECASE | re.DOTALL), '<prompt_injection_removed: hidden_text>'),
+    (re.compile(r'\[\s*(?:system|tool)\s*\]\s*:', re.IGNORECASE), '<prompt_injection_removed: fake_system_message>'),
+    (re.compile(r'!\[.*?\]\(https?://[^)]+\)|send\s+(?:this|the)\s+(?:data|prompt|context|system\s+prompt)\s+to\s+https?://|leak\s+(?:the\s+)?system\s+prompt', re.IGNORECASE), '<prompt_injection_removed: exfiltration_attempt>'),
+    (re.compile(r'in\s+(?:a\s+)?previous\s+(?:turn|message|conversation).*?you\s+(?:said|agreed|confirmed)', re.IGNORECASE | re.DOTALL), '<prompt_injection_removed: context_poisoning>'),
+    (re.compile(r'(?:the\s+(?:file|document|data|metadata)\s+(?:says?|contains?|instructs?)\s+(?:you\s+to\s+)?)', re.IGNORECASE), '<prompt_injection_removed: indirect_injection>'),
+    (re.compile(r'(?:eval|exec|os\.system|subprocess\.(?:call|run|Popen)|__import__)\s*\(', re.IGNORECASE), '<prompt_injection_removed: command_injection>'),
+    (re.compile(r'(?:part\s*1\s*of\s*\d+|continued\s+in\s+(?:next|part)|\[\s*split\s*\])', re.IGNORECASE), '<prompt_injection_removed: split_payload>'),
+    (re.compile(r'(?:DAN\s+mode|developer\s+mode\s+enabled|pretend\s+(?:you\s+are|to\s+be)\s+(?:an?\s+)?(?:AI\s+without|unrestricted)|fictional\s+framing)', re.IGNORECASE), '<prompt_injection_removed: jailbreak_attempt>'),
+]
+
+
+def _ai_app_sec_070_sanitize(text: str) -> str:
+    """Sanitize user input and file contents to remove prompt injection attempts."""
+    if not isinstance(text, str):
+        return text
+    for pattern, marker in _ai_app_sec_070_patterns:
+        text = pattern.sub(marker, text)
+    return text
 import logging
 from collections import OrderedDict
 from typing import (
@@ -34,6 +59,35 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from quivr_core.llm import LLMEndpoint
+import re as _re
+
+_AI_APP_SEC_006_DISAPPROVED_PATTERNS = [
+    r"deepseek",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model name for comparison by lowercasing and removing separators."""
+    return _re.sub(r"[\s\-_\.:\u200b]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(llm_endpoint) -> None:
+    """Raise ValueError if the LLMEndpoint's model is on the disapproved list."""
+    try:
+        model_name = (
+            getattr(llm_endpoint._llm, "model_name", None)
+            or getattr(llm_endpoint._llm, "model", None)
+            or ""
+        )
+    except Exception:
+        model_name = ""
+    normalized = _ai_app_sec_006_normalize(str(model_name))
+    for pattern in _AI_APP_SEC_006_DISAPPROVED_PATTERNS:
+        if _re.search(pattern, normalized):
+            raise ValueError(
+                f"Model '{model_name}' is not approved for use in this organization. "
+                "Please use an approved model."
+            )
 from quivr_core.llm_tools.llm_tools import LLMToolFactory
 from quivr_core.rag.entities.chat import ChatHistory
 from quivr_core.rag.entities.config import DefaultRerankers, NodeConfig, RetrievalConfig
@@ -331,7 +385,8 @@ class QuivrQARAGLangGraph:
         response: SplittedInput
 
         try:
-            structured_llm = self.llm_endpoint._llm.with_structured_output(
+            structured_llm =             _ai_app_sec_006_check_model(self.llm_endpoint)
+            self.llm_endpoint._llm.with_structured_output(
                 SplittedInput, method="json_schema"
             )
             response = structured_llm.invoke(msg)
@@ -924,7 +979,7 @@ class QuivrQARAGLangGraph:
         tasks = state["tasks"]
         docs: List[Document] = tasks.docs if tasks else []
         messages = state["messages"]
-        user_task = messages[0].content
+        user_task = _ai_app_sec_070_sanitize(messages[0].content)
         prompt_template: BasePromptTemplate = custom_prompts[
             TemplatePromptName.ZENDESK_TEMPLATE_PROMPT
         ]
@@ -1077,9 +1132,9 @@ class QuivrQARAGLangGraph:
         """
         Answer a question using the langgraph chain and yield each chunk of the answer separately.
         """
-        concat_list_files = format_file_list(
+        concat_list_files = _ai_app_sec_070_sanitize(format_file_list(
             list_files, self.retrieval_config.max_files
-        )
+        ))
         conversational_qa_chain = self.build_chain()
 
         rolling_message = AIMessageChunk(content="")

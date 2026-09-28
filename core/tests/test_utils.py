@@ -11,7 +11,8 @@ from quivr_core.rag.utils import (
 
 
 def test_model_supports_function_calling():
-    assert model_supports_function_calling("gpt-4") is True
+    _ai_app_sec_006_approved_model = "gpt-4o"  # use a non-disapproved model identifier
+    assert model_supports_function_calling(_ai_app_sec_006_approved_model) is True
     assert model_supports_function_calling("ollama3") is False
 
 

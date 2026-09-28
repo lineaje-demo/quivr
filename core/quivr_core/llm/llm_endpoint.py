@@ -19,6 +19,30 @@ from quivr_core.rag.utils import model_supports_function_calling
 
 logger = logging.getLogger("quivr_core")
 
+_AI_APP_SEC_006_DISAPPROVED_PATTERNS = [
+    "deepseekr1distillllama70b",
+    "deepseekr1",
+    "deepseekreasoner",
+    "deepseekchat",
+    "deepseek",
+]
+
+
+def _ai_app_sec_006_normalize(name: str) -> str:
+    """Normalize a model identifier for registry comparison."""
+    import re
+    return re.sub(r"[\s\-_\.:\u0000-\u001f]", "", name).lower()
+
+
+def _ai_app_sec_006_check_model(model: str) -> None:
+    """Raise ValueError if the model is on the organization's disapproved list."""
+    normalized = _ai_app_sec_006_normalize(model)
+    for pattern in _AI_APP_SEC_006_DISAPPROVED_PATTERNS:
+        if pattern in normalized:
+            raise ValueError(
+                f"Model '{model}' is on the organization's disapproved list and cannot be used."
+            )
+
 
 class LLMTokenizer:
     _cache: dict[
@@ -213,6 +237,7 @@ class LLMEndpoint:
         hashed_config = hash(config)
         if hashed_config in cls._cache:
             return cls._cache[hashed_config]
+        _ai_app_sec_006_check_model(config.model)
 
         _llm: Union[
             AzureChatOpenAI,
