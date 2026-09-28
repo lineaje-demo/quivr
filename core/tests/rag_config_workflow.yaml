@@ -40,7 +40,7 @@ retrieval_config:
     supplier: "openai"
 
     # The model to use for the LLM for the given supplier
-    model: "gpt-3.5-turbo-0125"
+    model: "gpt-3.5-turbo-0125" # not on disapproved list; permitted per org model registry
 
     max_context_tokens: 2000
 
