@@ -4,6 +4,11 @@ import chainlit as cl
 from quivr_core import Brain
 from quivr_core.rag.entities.config import RetrievalConfig
 
+# LINEAJE UnifAI suggested fix (Do not store secrets in code.) - not applied; review and apply by hand.
+# AI_DAT_SEC_001: Use Env Variables Move secrets to environment variable(s) and update the code to
+# read them from the secret manager.
+# End of LINEAJE suggestion.
+DB_PASSWORD = "Demo-Hardcoded-Passw0rd-12345"  # fake secret for the Lineaje demo
 
 @cl.on_chat_start
 async def on_chat_start():
