@@ -1,3 +1,40 @@
+# Copyright (c) Lineaje, Inc. All rights reserved.
+# Lineaje UnifAI guardrail  version=2.0.0-alpha
+def _lineaje_load_gr_client():
+    """Lineaje-added: load gr_stub_client.py without a pip dependency (missing / broken: a pass-through client)."""
+    import sys as _s, importlib.util as _ilu
+    from pathlib import Path as _P
+    n = "_lineaje_gr_stub_client"
+    if n in _s.modules: return _s.modules[n]
+    try:
+        h = _P(__file__).resolve().parent
+        _cand = next((d / "gr_stub_client.py" for d in [h, *h.parents][:8] if (d / "gr_stub_client.py").is_file()), h / "gr_stub_client.py")
+        _spec = _ilu.spec_from_file_location(n, _cand)
+        _s.modules[n] = _m = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_m); return _m
+    except Exception:
+        _s.modules.pop(n, None)
+        return type('_lineaje_gr_unavailable', (), {'STUB_API': 999999, 'GuardrailUnavailableError': type('GuardrailUnavailableError', (PermissionError,), {}), 'SiteDescriptor': staticmethod(lambda *a, **k: None), 'new_interaction_id': staticmethod(lambda *a, **k: None), 'enforce': staticmethod(lambda _s, _p, *a, **k: _p), 'enforce_request': staticmethod(lambda _s, _p, *a, **k: _p), 'enforce_reply': staticmethod(lambda _s, _p, *a, **k: _p)})
+def _lineaje_current_model():
+    """Lineaje-added: reread the app's model setting for every request."""
+    import os as _o
+    from pathlib import Path as _P
+    _keys = ("OPENROUTER_MODEL", "LLM_MODEL", "MODEL_NAME", "MODEL_ID", "OPENAI_MODEL", "ANTHROPIC_MODEL", "BEDROCK_MODEL_ID")
+    _here = _P(__file__).resolve().parent
+    for _path in (_here / ".env", *(_p / ".env" for _p in list(_here.parents)[:8])):
+        if not _path.is_file(): continue
+        try: _lines = _path.read_text(encoding="utf-8").splitlines()
+        except OSError: continue
+        _values = {}
+        for _line in _lines:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line: continue
+            _key, _, _value = _line.partition("=")
+            if _key.strip() in _keys: _values[_key.strip()] = _value.strip().strip(chr(34)).strip(chr(39))
+        for _key in _keys:
+            if _values.get(_key): return _values[_key]
+    return next((_o.environ[_key].strip() for _key in _keys if _o.environ.get(_key, "").strip()), "")
+
 import os
 
 import pytest
@@ -14,7 +51,18 @@ def test_llm_endpoint_from_config_default():
     del os.environ["OPENAI_API_KEY"]
 
     with pytest.raises((ValidationError, ValueError)):
-        llm = LLMEndpoint.from_config(LLMEndpointConfig())
+        _lineaje_payload = LLMEndpointConfig()
+        # LINEAJE: enforce() `_lineaje_payload` at agent->llm pre_model — this payload crossed a trust boundary with no runtime policy check. Mask/block; do not remove without review. site_id='site:sha256:d22de0fc4f9d9acd750d42413f771c1c24484d52c4073105cfeee642fe848c7a'
+        _gr_client = _lineaje_load_gr_client()
+        _lineaje_interaction_id = _gr_client.new_interaction_id()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:d22de0fc4f9d9acd750d42413f771c1c24484d52c4073105cfeee642fe848c7a', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, candidate_policies=[{'policy_id': 'AI_AGENT_ACTIVITY_LOG', 'policy_name': 'AI agent activity logging', 'guardrail_id': 'Log agent to LLM activity', 'policy_version': '2026.08.1'}, {'policy_id': 'AI_APP_SEC_006', 'policy_name': "Use only LLMs from the organization's approved list.", 'guardrail_id': 'Enforce Approved LLM.', 'policy_version': '2026.08.1'}, {'policy_id': 'AI_APP_SEC_028', 'policy_name': "Do not use LLMs from the organization's disallowed list", 'guardrail_id': 'Enforce Approved LLM', 'policy_version': '2026.08.1'}, {'policy_id': 'AI_APP_SEC_070', 'policy_name': 'Detect and block all forms of prompt injection attacks in user inputs and file contents', 'guardrail_id': 'Sanitize Prompt Injection', 'policy_version': '2026.08.1'}, {'policy_id': 'AI_DAT_SEC_011', 'policy_name': 'Do not send PII and/or secrets to AI Models', 'guardrail_id': 'Redact PII', 'policy_version': '2026.08.1'}, {'policy_id': 'AI_DAT_SEC_029', 'policy_name': 'Enforce decision logging, audit trail, and forensic readiness for AI-driven actions.', 'guardrail_id': 'Emit immutable, forensic-ready audit records for all AI decisions.', 'policy_version': '2026.08.1'}], fail_mode='BLOCK', source_type='agent', destination_type='llm', project='tree', organization='', project_name='quivr', project_version='main', project_branch='main', components={'source': {'entity_type': 'agent', 'file_path': 'core/tests/test_llm_endpoint.py', 'line': 12, 'name': 'ChatOpenAI', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'unique_org_id': 'vdna_6dXylGIYVjVO6Lkf'}, 'destination': {'entity_type': 'llm', 'name': 'llama2', 'provider': 'meta', 'version': ''}, 'identity': {'app': {'name': 'quivr', 'purl': 'pkg:github/lineaje-demo/quivr@main?commit-id=cb72bb5e125b56bc68c0a6ef2b473794a944ef53&commit-time=2026-09-27%2000%3A34%3A20%20%2B0000&build_file=core/pyproject.toml&repo_strategy=single-repo', 'version': 'main'}, 'destination': {'entity_type': 'aimodel', 'name': 'LLaMA', 'purl': 'pkg:aimodel/LLaMA@2', 'version': '2'}, 'source': {'entity_type': 'aiagent', 'name': 'ChatOpenAI', 'purl': 'pkg:aiagent/ChatOpenAI@1.0.0', 'version': '1.0.0'}}, 'invocation': {'file': 'core/tests/test_llm_endpoint.py', 'function': 'test_llm_endpoint_from_config_default', 'line': 17}, 'file': 'core/tests/test_llm_endpoint.py', 'line': 17, 'function': 'test_llm_endpoint_from_config_default', 'agent_name': 'test_llm_endpoint_from_config_default', 'agent_name_source': 'inferred_from_function', 'boundary_id': 'bnd:43ee7ae39d92303f'}, interaction_id=_lineaje_interaction_id)
+        try:
+            _lineaje_payload = _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json', variable_name='_lineaje_payload', source_file=__file__, before_line=17)
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            raise
+        llm = LLMEndpoint.from_config(_lineaje_payload)
 
     # Working default
     config = LLMEndpointConfig(llm_api_key="test")
