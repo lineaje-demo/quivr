@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       create_fix_pr:
-        description: "Open a remediation PR with the code suggestions adn intercepts"
+        description: "Open a remediation PR with the code suggestions and intercepts"
         type: boolean
         default: true
 
@@ -33,12 +33,6 @@ jobs:
           cp .github/scm_unifai_scan_hybrid.py /tmp/scm_unifai_scan_hybrid.py
           rm -rf .github .git
 
-      # Per-run folder on the VM (the self-hosted runner host):
-      #   /home/azureuser/unifai-scans/<owner>/<repo>/<branch>-<sha7>-<run_id>/
-      #     source/    batch archives sent to the MCP server (UNIFAI_SCAN_ARCHIVE_DIR)
-      #     tarballs/  entities.aientity / findings.aifinding tar.gz the server wrote
-      #                during this run (server: LINEAJE_KEEP_LOCAL_UPLOAD_ARTIFACTS=1,
-      #                LINEAJE_LOCAL_UPLOAD_ARTIFACTS_DIR -> /home/azureuser/unifai-scans/tarballs)
       - name: Prepare scan output folder
         run: |
           # Built from the runner's GITHUB_* variables: no context expressions inside run:.
@@ -50,10 +44,6 @@ jobs:
       - name: Run Lineaje AI policy scan
         env:
           LINEAJE_PAT_TOKEN: ${{ secrets.LINEAJE_PAT_TOKEN }}
-          # Remediation PR token. GITHUB_TOKEN cannot open PRs when the org disables
-          # "Allow GitHub Actions to create and approve pull requests"; set the
-          # LINEAJE_FIX_PR_TOKEN secret (fine-grained PAT or GitHub App token with
-          # Contents + Pull requests: Read and write on this repo) to use it instead.
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           MCP_TLS_INSECURE_SKIP_VERIFY: "1"
           UNIFAI_SCAN_ARCHIVE_DIR: ${{ env.UNIFAI_RUN_DIR }}/source
