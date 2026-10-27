@@ -1,3 +1,17 @@
+# Copyright (c) Lineaje, Inc. All rights reserved.
+# Lineaje UnifAI guardrail  version=2.0.0-alpha
+def _lineaje_load_gr_client():
+    """Lineaje-added: load gr_stub_client.py (missing / broken: a pass-through client)."""
+    import sys, importlib.util as u, pathlib
+    n = "_lineaje_gr_stub_client"
+    if n in sys.modules: return sys.modules[n]
+    try:
+        h = pathlib.Path(__file__).resolve().parent
+        s = u.spec_from_file_location(n, next(p for p in (d / "gr_stub_client.py" for d in [h, *h.parents][:8]) if p.is_file()))
+        m = sys.modules[n] = u.module_from_spec(s); s.loader.exec_module(m); return m
+    except Exception:
+        sys.modules.pop(n, None); return __import__('types').SimpleNamespace(STUB_API=999999, GuardrailUnavailableError=type('GuardrailUnavailableError', (PermissionError,), {}), SiteDescriptor=lambda *a, **k: None, new_interaction_id=lambda *a, **k: None, enforce=lambda _s, _p, *a, **k: _p, enforce_request=lambda _s, _p, *a, **k: _p, enforce_reply=lambda _s, _p, *a, **k: _p)
+
 import asyncio
 import datetime
 import logging
@@ -250,6 +264,18 @@ class IdempotentCompressor(BaseDocumentCompressor):
         This is a placeholder until a more sophisticated document compression
         algorithm is implemented.
         """
+        # LINEAJE: runtime guardrail checks `documents` as it flows from the agent to the user interface, before it leaves the application (in IdempotentCompressor.compress_documents).
+        #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `documents` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:58dba1272b49cd57d0b75c28159382429c9783c3c5f11e9400f0832aced37ebd'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:58dba1272b49cd57d0b75c28159382429c9783c3c5f11e9400f0832aced37ebd', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 253, 'function': 'IdempotentCompressor.compress_documents'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 253, 'function': 'compress_documents', 'agent_name': 'IdempotentCompressor', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+        try:
+            documents = _gr_client.enforce(_gr_site, documents, content_type='text/plain')
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            pass
         return documents
 
 
@@ -307,6 +333,12 @@ class QuivrQARAGLangGraph:
             VectorStoreRetriever: The retriever.
         """
         if self.vector_store:
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:87e108ad9a751fb76cb5723a36f4f764a4d41f2152e21c6f4c150347a7c75a2d', phase='', boundary={}, fail_mode='ALLOW', source_type='vector_store', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 310, 'function': 'get_retriever', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'self.vector_store.as_retriever', 'source': {'entity_type': 'agent', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'function': 'QuivrQARAGLangGraph.get_retriever', 'line': 310}, 'destination': {'entity_type': 'rag', 'file_path': 'core/quivr_core/brain/brain_defaults.py', 'line': 13, 'name': 'FAISS', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY'}, 'boundary_id': 'bnd:15adf0b96ff60a8b'}, observe_only=True)
+                _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'rag_retrieve'}, content_type='application/json')
+            except Exception:
+                pass
             retriever = self.vector_store.as_retriever(**kwargs)
         else:
             raise ValueError("No vector store provided")
@@ -331,16 +363,72 @@ class QuivrQARAGLangGraph:
         response: SplittedInput
 
         try:
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:d8296b2b5a59c38524aa1dfe5af64912db6bcae61c2d472f054b72f83d6a81f8', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='llm', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 334, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'self.llm_endpoint._llm.with_structured_output', 'source': {'entity_type': 'agent', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'function': 'QuivrQARAGLangGraph.routing', 'line': 334}, 'destination': {'entity_type': 'llm', 'name': 'gpt-4o', 'provider': 'openai', 'version': ''}, 'boundary_id': 'bnd:dfb283ce0ee4c588'}, observe_only=True)
+                _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_llm'}, content_type='application/json')
+            except Exception:
+                pass
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 SplittedInput, method="json_schema"
             )
+            # LINEAJE: runtime guardrail checks `msg` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.routing).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `msg` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:0d4a8228f9b53d8c3d8bea4f7b07979d3311ebca3acf97b7ab801f8508502c0b'
+            _lineaje_msg_evidence = {'msg': msg, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:0d4a8228f9b53d8c3d8bea4f7b07979d3311ebca3acf97b7ab801f8508502c0b', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 337, 'function': 'QuivrQARAGLangGraph.routing'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 337, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                _lineaje_msg_evidence = _gr_client.enforce(_gr_site, _lineaje_msg_evidence, content_type='application/json')
+                msg = _lineaje_msg_evidence.get('msg', msg) if isinstance(_lineaje_msg_evidence, dict) else msg
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             response = structured_llm.invoke(msg)
+            # LINEAJE: runtime guardrail checks `response` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.routing).
+            #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `response` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:40ae66340d5773901df72c93ec2f282cb652d4ff0757743ea208c17076f3a85a'
+            _gr_client = _lineaje_load_gr_client()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:40ae66340d5773901df72c93ec2f282cb652d4ff0757743ea208c17076f3a85a', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'function': 'QuivrQARAGLangGraph.routing', 'line': 337}, 'destination': {'entity_type': 'llm', 'name': 'gpt-4o', 'provider': 'openai', 'version': ''}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 337, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'boundary_id': 'bnd:dfb283ce0ee4c588'}, interaction_id=locals().get('_lineaje_interaction_id'))
+            try:
+                response = _gr_client.enforce(_gr_site, response, content_type='application/json', variable_name='response', source_file=__file__, before_line=337)
+            except _gr_client.GuardrailUnavailableError:
+                pass
 
         except openai.BadRequestError:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 SplittedInput
             )
+            # LINEAJE: runtime guardrail checks `msg` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.routing).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `msg` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:11b68616426fe15f3c5d108c5f6c4b56918f5ce28a3d80d3a245e9280af83dc3'
+            _lineaje_msg_evidence = {'msg': msg, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:11b68616426fe15f3c5d108c5f6c4b56918f5ce28a3d80d3a245e9280af83dc3', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 343, 'function': 'QuivrQARAGLangGraph.routing'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 343, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                _lineaje_msg_evidence = _gr_client.enforce(_gr_site, _lineaje_msg_evidence, content_type='application/json')
+                msg = _lineaje_msg_evidence.get('msg', msg) if isinstance(_lineaje_msg_evidence, dict) else msg
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             response = structured_llm.invoke(msg)
+            # LINEAJE: runtime guardrail checks `response` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.routing).
+            #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `response` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:7c89923262ace34cc9b681142c0367a893a02cd5fc4a564115c2e48dc2ddecb2'
+            _gr_client = _lineaje_load_gr_client()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:7c89923262ace34cc9b681142c0367a893a02cd5fc4a564115c2e48dc2ddecb2', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 343, 'function': 'QuivrQARAGLangGraph.routing'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 343, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=locals().get('_lineaje_interaction_id'))
+            try:
+                response = _gr_client.enforce(_gr_site, response, content_type='application/json', variable_name='response', source_file=__file__, before_line=343)
+            except _gr_client.GuardrailUnavailableError:
+                pass
 
         send_list: List[Send] = []
 
@@ -351,9 +439,21 @@ class QuivrQARAGLangGraph:
         )
 
         if instructions:
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:13aeb5be35a56af3fb4a252304b7c42900d300d0a579996c3b5e88e807135d96', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 354, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json')
+            except Exception:
+                pass
             send_list.append(Send("edit_system_prompt", {"instructions": instructions}))
         elif response.task_list:
             chat_history = state["chat_history"]
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:0e00668a2c2165b1cdaec9245c94a6d85c85a94dd0f8142884aed46e05a07e37', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 358, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json')
+            except Exception:
+                pass
             send_list.append(
                 Send(
                     "filter_history",
@@ -364,6 +464,18 @@ class QuivrQARAGLangGraph:
                 )
             )
 
+        # LINEAJE: runtime guardrail checks `send_list` as it flows from the agent to the user interface, before it leaves the application (in QuivrQARAGLangGraph.routing).
+        #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `send_list` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:71d0ae9e91d666610108a3ecd5527edc1eed884294ff4dc07c2b5ab6d05ea8bc'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:71d0ae9e91d666610108a3ecd5527edc1eed884294ff4dc07c2b5ab6d05ea8bc', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 367, 'function': 'QuivrQARAGLangGraph.routing'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 367, 'function': 'routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+        try:
+            send_list = _gr_client.enforce(_gr_site, send_list, content_type='text/plain')
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            pass
         return send_list
 
     def routing_split(self, state: AgentState):
@@ -379,6 +491,12 @@ class QuivrQARAGLangGraph:
         tasks = UserTasks(response.task_list) if response.task_list else None
 
         if instructions:
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:5e688c3cc66db38a0700a2a3bb12a9fa2ee2bd1d506d8bcf4da4e97f99b4c19f', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 383, 'function': 'routing_split', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json')
+            except Exception:
+                pass
             return [
                 Send(
                     "edit_system_prompt",
@@ -386,6 +504,12 @@ class QuivrQARAGLangGraph:
                 )
             ]
         elif tasks:
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:61dd87ad65397f10f9bf4738f7b7bf25e803d5ed3e22bf494143515d07bf38f4', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 389, 'function': 'routing_split', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json')
+            except Exception:
+                pass
             return [Send("filter_history", {**state, "tasks": tasks})]
 
         return []
@@ -502,6 +626,21 @@ class QuivrQARAGLangGraph:
 
             model = self.llm_endpoint._llm
             # Asynchronously invoke the model for each question
+            # LINEAJE: runtime guardrail checks `msg` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.rewrite).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `msg` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:4ca2c3c020d7bbd2547e1f4a0ea72ab93c1eeccd800c0a9922c962c97b48f8b2'
+            _lineaje_msg_evidence = {'msg': msg, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:4ca2c3c020d7bbd2547e1f4a0ea72ab93c1eeccd800c0a9922c962c97b48f8b2', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 505, 'function': 'QuivrQARAGLangGraph.rewrite'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 505, 'function': 'rewrite', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                _lineaje_msg_evidence = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, _lineaje_msg_evidence, content_type='application/json'))
+                msg = _lineaje_msg_evidence.get('msg', msg) if isinstance(_lineaje_msg_evidence, dict) else msg
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             async_jobs.append((model.ainvoke(msg), task_id))
 
         # Gather all the responses asynchronously
@@ -515,6 +654,16 @@ class QuivrQARAGLangGraph:
         # Replace each question with its condensed version
         for response, task_id in zip(responses, task_ids, strict=False):
             tasks.set_definition(task_id, response.content)
+            # LINEAJE: runtime guardrail checks `response` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.rewrite).
+            #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `response` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:82c69e77e7909612460ca546a1af1d025c1ed98f1e3b89279b6e7b674b666d31'
+            _gr_client = _lineaje_load_gr_client()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:82c69e77e7909612460ca546a1af1d025c1ed98f1e3b89279b6e7b674b666d31', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 517, 'function': 'QuivrQARAGLangGraph.rewrite'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 517, 'function': 'rewrite', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=locals().get('_lineaje_interaction_id'))
+            try:
+                response = _gr_client.enforce(_gr_site, response, content_type='application/json', variable_name='response', source_file=__file__, before_line=517)
+            except _gr_client.GuardrailUnavailableError:
+                pass
 
         return {**state, "tasks": tasks}
 
@@ -525,13 +674,38 @@ class QuivrQARAGLangGraph:
         )
 
         if relevance_score_threshold is None:
+            # LINEAJE: runtime guardrail checks `chunks` as it flows from the agent to the user interface, before it leaves the application (in QuivrQARAGLangGraph.filter_chunks_by_relevance).
+            #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+            #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `chunks` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:47b73da74fb8498a8cbc754a31025541f24e12a71ccd3511ab213b9d5363e151'
+            _gr_client = _lineaje_load_gr_client()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:47b73da74fb8498a8cbc754a31025541f24e12a71ccd3511ab213b9d5363e151', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 528, 'function': 'QuivrQARAGLangGraph.filter_chunks_by_relevance'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 528, 'function': 'filter_chunks_by_relevance', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+            try:
+                chunks = _gr_client.enforce(_gr_site, chunks, content_type='text/plain')
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                pass
             return chunks
 
         filtered_chunks = []
         for chunk in chunks:
             if config.relevance_score_key not in chunk.metadata:
+                _lineaje_payload = f"Relevance score key {config.relevance_score_key} not found in metadata, cannot filter chunks by relevance"
+                # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the application log, before it is written to the log (in QuivrQARAGLangGraph.filter_chunks_by_relevance).
+                #   Detected: this statement moves data from the agent to the application log with no runtime policy check (detection confidence: high).
+                #   Decision: the Guardrail evaluates AI_DAT_SEC_010; sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+                #   Do not remove without review. site_id='site:sha256:0300eea5637c93444dc88251be43b5e77c5afbfacb58b438e0df0fea07d891c4'
+                _gr_client = _lineaje_load_gr_client()
+                _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:0300eea5637c93444dc88251be43b5e77c5afbfacb58b438e0df0fea07d891c4', phase='log_emit', boundary={'source': 'log', 'sink': 'log'}, fail_mode='BLOCK', source_type='agent', destination_type='log', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 533, 'function': 'QuivrQARAGLangGraph.filter_chunks_by_relevance'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 533, 'function': 'filter_chunks_by_relevance', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+                try:
+                    _lineaje_payload = _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json')
+                except _gr_client.GuardrailUnavailableError:
+                    pass
+                except PermissionError:
+                    pass
                 logger.warning(
-                    f"Relevance score key {config.relevance_score_key} not found in metadata, cannot filter chunks by relevance"
+                    _lineaje_payload
                 )
                 filtered_chunks.append(chunk)
             elif (
@@ -539,11 +713,29 @@ class QuivrQARAGLangGraph:
             ):
                 filtered_chunks.append(chunk)
 
+        # LINEAJE: runtime guardrail checks `filtered_chunks` as it flows from the agent to the user interface, before it leaves the application (in QuivrQARAGLangGraph.filter_chunks_by_relevance).
+        #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `filtered_chunks` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:56f6bc28f9acb5b97e2dd6dd97769ba3b42afc8a1c9e1e7fcde6bc640d47f276'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:56f6bc28f9acb5b97e2dd6dd97769ba3b42afc8a1c9e1e7fcde6bc640d47f276', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 542, 'function': 'QuivrQARAGLangGraph.filter_chunks_by_relevance'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 542, 'function': 'filter_chunks_by_relevance', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+        try:
+            filtered_chunks = _gr_client.enforce(_gr_site, filtered_chunks, content_type='text/plain')
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            pass
         return filtered_chunks
 
     async def tool_routing(self, state: AgentState):
         tasks = state["tasks"]
         if not tasks.has_tasks():
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:8f2d3b75a42d2bc1806cb9d7c3f5db11aa067bb4652c9bf24de69ee38035d5b1', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 547, 'function': 'tool_routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                await __import__('asyncio').to_thread(lambda: _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json'))
+            except Exception:
+                pass
             return [Send("generate_rag", state)]
 
         validated_tools, _ = collect_tools(self.retrieval_config.workflow_config)
@@ -579,10 +771,34 @@ class QuivrQARAGLangGraph:
         payload = {**state, "tasks": tasks}
 
         if tasks.has_non_completable_tasks():
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:8a4433cca4cc4d5aade189baabbc57e13e6b37bdd7159ba06991eb9a74de4e5f', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 582, 'function': 'tool_routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                await __import__('asyncio').to_thread(lambda: _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json'))
+            except Exception:
+                pass
             send_list.append(Send("run_tool", payload))
         else:
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:6c14e1ef9597c10056c6e432fca2c86d00bfbd8a6e9099818fae5791408c819e', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 584, 'function': 'tool_routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'Send', 'not_on_graph': True}, observe_only=True)
+                await __import__('asyncio').to_thread(lambda: _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_agent'}, content_type='application/json'))
+            except Exception:
+                pass
             send_list.append(Send("generate_rag", payload))
 
+        # LINEAJE: runtime guardrail checks `send_list` as it flows from the agent to the user interface, before it leaves the application (in QuivrQARAGLangGraph.tool_routing).
+        #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `send_list` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:36d08a9b6f61f005406ce8e2fccf6df6e10930cbcc6e3a57b62faf4699df7343'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:36d08a9b6f61f005406ce8e2fccf6df6e10930cbcc6e3a57b62faf4699df7343', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 586, 'function': 'QuivrQARAGLangGraph.tool_routing'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 586, 'function': 'tool_routing', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+        try:
+            send_list = _gr_client.enforce(_gr_site, send_list, content_type='text/plain')
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            pass
         return send_list
 
     async def run_tool(self, state: AgentState) -> AgentState:
@@ -600,6 +816,16 @@ class QuivrQARAGLangGraph:
                 tool = tasks(task_id).tool
                 tool_wrapper = LLMToolFactory.create_tool(tool, {})
                 formatted_input = tool_wrapper.format_input(tasks(task_id).definition)
+                # LINEAJE: runtime guardrail checks `formatted_input` as it flows from the agent to a tool, after the tool returns (in QuivrQARAGLangGraph.run_tool).
+                #   Detected: this statement moves data from the agent to a tool with no runtime policy check (detection confidence: medium).
+                #   Decision: the Guardrail evaluates the policies enabled for this boundary; sensitive values in `formatted_input` are masked in place; a policy violation is logged and the call continues (fail_mode=ALLOW_WITH_AUDIT). If the Guardrail is unreachable, the call continues unchanged.
+                #   Do not remove without review. site_id='site:sha256:ff66f03abb184c2fe6f68bee25fcba21779759e8ee2ee98062f266acc6acf8af'
+                _gr_client = _lineaje_load_gr_client()
+                _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:ff66f03abb184c2fe6f68bee25fcba21779759e8ee2ee98062f266acc6acf8af', phase='post_tool', boundary={'source': 'tool_result', 'sink': 'agent_message'}, fail_mode='ALLOW_WITH_AUDIT', source_type='agent', destination_type='tool', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 603, 'function': 'QuivrQARAGLangGraph.run_tool'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 603, 'function': 'run_tool', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+                try:
+                    formatted_input = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, formatted_input, content_type='application/json', variable_name='formatted_input', source_file=__file__, before_line=603))
+                except _gr_client.GuardrailUnavailableError:
+                    pass
                 async_jobs.append((tool_wrapper.tool.ainvoke(formatted_input), task_id))
 
         # Gather all the responses asynchronously
@@ -656,6 +882,12 @@ class QuivrQARAGLangGraph:
         async_jobs = []
         for task_id in tasks.ids:
             # Create a tuple of the retrieval task and task_id
+            try:
+                _lineaje_obs = _lineaje_load_gr_client()
+                _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:57cdb3d212118338f59fd2c3797129bbf6a0e0621eaf18b24b729ff6f166e086', phase='', boundary={}, fail_mode='ALLOW', source_type='vector_store', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 660, 'function': 'retrieve', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'tasks', 'not_on_graph': True}, observe_only=True)
+                await __import__('asyncio').to_thread(lambda: _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'rag_retrieve'}, content_type='application/json'))
+            except Exception:
+                pass
             async_jobs.append(
                 (compression_retriever.ainvoke(tasks(task_id).definition), task_id)
             )
@@ -711,8 +943,21 @@ class QuivrQARAGLangGraph:
             base_retriever = self.get_retriever(**kwargs)
 
             if i > 1:
+                _lineaje_payload = f"Increasing top_n to {top_n} and k to {k} to retrieve more relevant chunks"
+                # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the application log, before it is written to the log (in QuivrQARAGLangGraph.dynamic_retrieve).
+                #   Detected: this statement moves data from the agent to the application log with no runtime policy check (detection confidence: high).
+                #   Decision: the Guardrail evaluates AI_DAT_SEC_010; sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+                #   Do not remove without review. site_id='site:sha256:b4f3afcade4c9d6ecef363ed1d5f34c369e2e228f00dfe77dc60c3030e309e8d'
+                _gr_client = _lineaje_load_gr_client()
+                _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:b4f3afcade4c9d6ecef363ed1d5f34c369e2e228f00dfe77dc60c3030e309e8d', phase='log_emit', boundary={'source': 'log', 'sink': 'log'}, fail_mode='BLOCK', source_type='agent', destination_type='log', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 714, 'function': 'QuivrQARAGLangGraph.dynamic_retrieve'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 714, 'function': 'dynamic_retrieve', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+                try:
+                    _lineaje_payload = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json'))
+                except _gr_client.GuardrailUnavailableError:
+                    pass
+                except PermissionError:
+                    pass
                 logging.info(
-                    f"Increasing top_n to {top_n} and k to {k} to retrieve more relevant chunks"
+                    _lineaje_payload
                 )
 
             compression_retriever = ContextualCompressionRetriever(
@@ -723,6 +968,12 @@ class QuivrQARAGLangGraph:
             async_jobs = []
             for task_id in tasks.ids:
                 # Asynchronously invoke the model for each question
+                try:
+                    _lineaje_obs = _lineaje_load_gr_client()
+                    _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:3b8d0979ea9e9c8ef290df16003d2168a8852ee77023b41b33f5af057b30bda5', phase='', boundary={}, fail_mode='ALLOW', source_type='vector_store', destination_type='agent', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 727, 'function': 'dynamic_retrieve', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'tasks', 'not_on_graph': True}, observe_only=True)
+                    await __import__('asyncio').to_thread(lambda: _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'rag_retrieve'}, content_type='application/json'))
+                except Exception:
+                    pass
                 async_jobs.append(
                     (compression_retriever.ainvoke(tasks(task_id).definition), task_id)
                 )
@@ -747,9 +998,22 @@ class QuivrQARAGLangGraph:
 
             context_length = self.get_rag_context_length(state, docs)
             if context_length >= self.retrieval_config.llm_config.max_context_tokens:
+                _lineaje_payload = (f"The context length is {context_length} which is greater than "
+                    f"the max context tokens of {self.retrieval_config.llm_config.max_context_tokens}")
+                # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the application log, before it is written to the log (in QuivrQARAGLangGraph.dynamic_retrieve).
+                #   Detected: this statement moves data from the agent to the application log with no runtime policy check (detection confidence: high).
+                #   Decision: the Guardrail evaluates AI_DAT_SEC_010; sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+                #   Do not remove without review. site_id='site:sha256:a1d0e957d35878b96c99a8dfe42ba84ca10cc74e84afaa6b30d8fff1a298ca58'
+                _gr_client = _lineaje_load_gr_client()
+                _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:a1d0e957d35878b96c99a8dfe42ba84ca10cc74e84afaa6b30d8fff1a298ca58', phase='log_emit', boundary={'source': 'log', 'sink': 'log'}, fail_mode='BLOCK', source_type='agent', destination_type='log', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 750, 'function': 'QuivrQARAGLangGraph.dynamic_retrieve'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 750, 'function': 'dynamic_retrieve', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+                try:
+                    _lineaje_payload = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json'))
+                except _gr_client.GuardrailUnavailableError:
+                    pass
+                except PermissionError:
+                    pass
                 logging.warning(
-                    f"The context length is {context_length} which is greater than "
-                    f"the max context tokens of {self.retrieval_config.llm_config.max_context_tokens}"
+                    _lineaje_payload
                 )
                 break
 
@@ -812,7 +1076,20 @@ class QuivrQARAGLangGraph:
             )[:top_n]
         )
 
-        logger.info(f"Top knowledge IDs: {top_knowledge_ids}")
+        _lineaje_payload = f"Top knowledge IDs: {top_knowledge_ids}"
+        # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the application log, before it is written to the log (in QuivrQARAGLangGraph.retrieve_full_documents_context).
+        #   Detected: this statement moves data from the agent to the application log with no runtime policy check (detection confidence: high).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_010; sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:68da78994b82bd5ee5f3d86b3f93cbf138199c430182672f66293e2344af5b43'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:68da78994b82bd5ee5f3d86b3f93cbf138199c430182672f66293e2344af5b43', phase='log_emit', boundary={'source': 'log', 'sink': 'log'}, fail_mode='BLOCK', source_type='agent', destination_type='log', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 815, 'function': 'QuivrQARAGLangGraph.retrieve_full_documents_context'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 815, 'function': 'retrieve_full_documents_context', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+        try:
+            _lineaje_payload = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json'))
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            pass
+        logger.info(_lineaje_payload)
 
         _docs = []
 
@@ -892,9 +1169,22 @@ class QuivrQARAGLangGraph:
                     task_token_counts[longest_task_id]["total"] -= removed_tokens
                     tasks.set_docs(longest_task_id, tasks(longest_task_id).docs[:-1])
             else:
+                _lineaje_payload = (f"Not enough context to reduce. The context length is {n} "
+                    f"which is greater than the max context tokens of {max_context_tokens}")
+                # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the application log, before it is written to the log (in QuivrQARAGLangGraph.reduce_rag_context).
+                #   Detected: this statement moves data from the agent to the application log with no runtime policy check (detection confidence: high).
+                #   Decision: the Guardrail evaluates AI_DAT_SEC_010; sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+                #   Do not remove without review. site_id='site:sha256:7d61ffcea9ce191a08dca54a978266822907119a04e548fcf8300d8b34ef1c75'
+                _gr_client = _lineaje_load_gr_client()
+                _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:7d61ffcea9ce191a08dca54a978266822907119a04e548fcf8300d8b34ef1c75', phase='log_emit', boundary={'source': 'log', 'sink': 'log'}, fail_mode='BLOCK', source_type='agent', destination_type='log', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 895, 'function': 'QuivrQARAGLangGraph.reduce_rag_context'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 895, 'function': 'reduce_rag_context', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+                try:
+                    _lineaje_payload = _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json')
+                except _gr_client.GuardrailUnavailableError:
+                    pass
+                except PermissionError:
+                    pass
                 logging.warning(
-                    f"Not enough context to reduce. The context length is {n} "
-                    f"which is greater than the max context tokens of {max_context_tokens}"
+                    _lineaje_payload
                 )
                 break
 
@@ -906,8 +1196,21 @@ class QuivrQARAGLangGraph:
 
             iteration += 1
             if iteration > MAX_ITERATIONS:
+                _lineaje_payload = f"Attained the maximum number of iterations ({MAX_ITERATIONS})"
+                # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the application log, before it is written to the log (in QuivrQARAGLangGraph.reduce_rag_context).
+                #   Detected: this statement moves data from the agent to the application log with no runtime policy check (detection confidence: high).
+                #   Decision: the Guardrail evaluates AI_DAT_SEC_010; sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+                #   Do not remove without review. site_id='site:sha256:1a46d1f0d2283a98e1cd37f551d3a7345cb63645221449eead8d974ecb5c1310'
+                _gr_client = _lineaje_load_gr_client()
+                _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:1a46d1f0d2283a98e1cd37f551d3a7345cb63645221449eead8d974ecb5c1310', phase='log_emit', boundary={'source': 'log', 'sink': 'log'}, fail_mode='BLOCK', source_type='agent', destination_type='log', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 909, 'function': 'QuivrQARAGLangGraph.reduce_rag_context'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 909, 'function': 'reduce_rag_context', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+                try:
+                    _lineaje_payload = _gr_client.enforce(_gr_site, _lineaje_payload, content_type='application/json')
+                except _gr_client.GuardrailUnavailableError:
+                    pass
+                except PermissionError:
+                    pass
                 logging.warning(
-                    f"Attained the maximum number of iterations ({MAX_ITERATIONS})"
+                    _lineaje_payload
                 )
                 break
 
@@ -949,7 +1252,32 @@ class QuivrQARAGLangGraph:
         msg = prompt_template.format_prompt(**inputs)
         llm = self.bind_tools_to_llm(self.generate_zendesk_rag.__name__)
 
+        # LINEAJE: runtime guardrail checks `msg` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.generate_zendesk_rag).
+        #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `msg` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:27eb55300402f0bc08d9ab42158f1afe7379393f1d76fa161aaefc96220264b2'
+        _lineaje_msg_evidence = {'msg': msg, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+        _gr_client = _lineaje_load_gr_client()
+        _lineaje_interaction_id = _gr_client.new_interaction_id()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:27eb55300402f0bc08d9ab42158f1afe7379393f1d76fa161aaefc96220264b2', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 952, 'function': 'QuivrQARAGLangGraph.generate_zendesk_rag'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 952, 'function': 'generate_zendesk_rag', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+        try:
+            _lineaje_msg_evidence = _gr_client.enforce(_gr_site, _lineaje_msg_evidence, content_type='application/json')
+            msg = _lineaje_msg_evidence.get('msg', msg) if isinstance(_lineaje_msg_evidence, dict) else msg
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            raise
         response = llm.invoke(msg)
+        # LINEAJE: runtime guardrail checks `response` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.generate_zendesk_rag).
+        #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `response` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:235e285f1488973d9a48ccd221d93cc1df5a64c4ca59f13c482c1891e63b8918'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:235e285f1488973d9a48ccd221d93cc1df5a64c4ca59f13c482c1891e63b8918', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 952, 'function': 'QuivrQARAGLangGraph.generate_zendesk_rag'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 952, 'function': 'generate_zendesk_rag', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=locals().get('_lineaje_interaction_id'))
+        try:
+            response = _gr_client.enforce(_gr_site, response, content_type='application/json', variable_name='response', source_file=__file__, before_line=952)
+        except _gr_client.GuardrailUnavailableError:
+            pass
 
         return {**state, "messages": [response]}
 
@@ -961,7 +1289,32 @@ class QuivrQARAGLangGraph:
         state, inputs = self.reduce_rag_context(state, inputs, prompt)
         msg = prompt.format(**inputs)
         llm = self.bind_tools_to_llm(self.generate_rag.__name__)
+        # LINEAJE: runtime guardrail checks `msg` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.generate_rag).
+        #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `msg` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:6f310daf8d1fc35fa942643f396e0dd6ffdb12987f30437d40733f8b764b3046'
+        _lineaje_msg_evidence = {'msg': msg, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+        _gr_client = _lineaje_load_gr_client()
+        _lineaje_interaction_id = _gr_client.new_interaction_id()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:6f310daf8d1fc35fa942643f396e0dd6ffdb12987f30437d40733f8b764b3046', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 964, 'function': 'QuivrQARAGLangGraph.generate_rag'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 964, 'function': 'generate_rag', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+        try:
+            _lineaje_msg_evidence = _gr_client.enforce(_gr_site, _lineaje_msg_evidence, content_type='application/json')
+            msg = _lineaje_msg_evidence.get('msg', msg) if isinstance(_lineaje_msg_evidence, dict) else msg
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            raise
         response = llm.invoke(msg)
+        # LINEAJE: runtime guardrail checks `response` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.generate_rag).
+        #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `response` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:5d8dd67261b095913a80d08a6da3f065ab5274bda2c16702e846245a7e2da1f1'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:5d8dd67261b095913a80d08a6da3f065ab5274bda2c16702e846245a7e2da1f1', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 964, 'function': 'QuivrQARAGLangGraph.generate_rag'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 964, 'function': 'generate_rag', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=locals().get('_lineaje_interaction_id'))
+        try:
+            response = _gr_client.enforce(_gr_site, response, content_type='application/json', variable_name='response', source_file=__file__, before_line=964)
+        except _gr_client.GuardrailUnavailableError:
+            pass
 
         return {**state, "messages": [response]}
 
@@ -1014,10 +1367,61 @@ class QuivrQARAGLangGraph:
             ]
         )
         # Run
+        _lineaje_payload = {"chat_history": final_inputs["chat_history"]}
+        # LINEAJE: runtime guardrail checks `_lineaje_payload` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.generate_chat_llm).
+        #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `_lineaje_payload` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:aba415e6d06f0a76401670fcb9060bae7d4debea3d7618a59e4296b2fcf4d495'
+        _lineaje__lineaje_payload_evidence = {'_lineaje_payload': _lineaje_payload, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+        _gr_client = _lineaje_load_gr_client()
+        _lineaje_interaction_id = _gr_client.new_interaction_id()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:aba415e6d06f0a76401670fcb9060bae7d4debea3d7618a59e4296b2fcf4d495', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1017, 'function': 'QuivrQARAGLangGraph.generate_chat_llm'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1017, 'function': 'generate_chat_llm', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+        try:
+            _lineaje__lineaje_payload_evidence = _gr_client.enforce(_gr_site, _lineaje__lineaje_payload_evidence, content_type='application/json')
+            _lineaje_payload = _lineaje__lineaje_payload_evidence.get('_lineaje_payload', _lineaje_payload) if isinstance(_lineaje__lineaje_payload_evidence, dict) else _lineaje_payload
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            raise
         chat_llm_prompt = CHAT_LLM_PROMPT.invoke(
-            {"chat_history": final_inputs["chat_history"]}
+            _lineaje_payload
         )
+        # LINEAJE: runtime guardrail checks `chat_llm_prompt` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.generate_chat_llm).
+        #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `chat_llm_prompt` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:77aa9f22d8d6ea198f6551efdf285f8d0babdf91522e8f08920583d02131445c'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:77aa9f22d8d6ea198f6551efdf285f8d0babdf91522e8f08920583d02131445c', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1017, 'function': 'QuivrQARAGLangGraph.generate_chat_llm'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1017, 'function': 'generate_chat_llm', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=locals().get('_lineaje_interaction_id'))
+        try:
+            chat_llm_prompt = _gr_client.enforce(_gr_site, chat_llm_prompt, content_type='application/json', variable_name='chat_llm_prompt', source_file=__file__, before_line=1017)
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        # LINEAJE: runtime guardrail checks `chat_llm_prompt` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.generate_chat_llm).
+        #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `chat_llm_prompt` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:2791dfe3c21a8dab118acea2ac667242c7296ca8cce0ab01c8e6d7288d46620b'
+        _lineaje_chat_llm_prompt_evidence = {'chat_llm_prompt': chat_llm_prompt, 'model': getattr(_lineaje_load_gr_client(), 'current_model', lambda _f: '')(__file__)}
+        _gr_client = _lineaje_load_gr_client()
+        _lineaje_interaction_id = _gr_client.new_interaction_id()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:2791dfe3c21a8dab118acea2ac667242c7296ca8cce0ab01c8e6d7288d46620b', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1020, 'function': 'QuivrQARAGLangGraph.generate_chat_llm'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1020, 'function': 'generate_chat_llm', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+        try:
+            _lineaje_chat_llm_prompt_evidence = _gr_client.enforce(_gr_site, _lineaje_chat_llm_prompt_evidence, content_type='application/json')
+            chat_llm_prompt = _lineaje_chat_llm_prompt_evidence.get('chat_llm_prompt', chat_llm_prompt) if isinstance(_lineaje_chat_llm_prompt_evidence, dict) else chat_llm_prompt
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            raise
         response = llm.invoke(chat_llm_prompt)
+        # LINEAJE: runtime guardrail checks `response` as it flows from the LLM to the agent, after the model replies (in QuivrQARAGLangGraph.generate_chat_llm).
+        #   Detected: this statement moves data from the LLM to the agent with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_DAT_SEC_011, AI_DAT_SEC_025, AI_DAT_SEC_027, AI_DAT_SEC_029; sensitive values in `response` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:05232b3cd58eb985085104dc0a6114dec4d3268362c66fdf59309f69e309ebf3'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:05232b3cd58eb985085104dc0a6114dec4d3268362c66fdf59309f69e309ebf3', phase='post_model', boundary={'source': 'model', 'sink': 'agent_message'}, fail_mode='BLOCK', source_type='llm', destination_type='agent', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1020, 'function': 'QuivrQARAGLangGraph.generate_chat_llm'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1020, 'function': 'generate_chat_llm', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=locals().get('_lineaje_interaction_id'))
+        try:
+            response = _gr_client.enforce(_gr_site, response, content_type='application/json', variable_name='response', source_file=__file__, before_line=1020)
+        except _gr_client.GuardrailUnavailableError:
+            pass
         return {**state, "messages": [response]}
 
     def build_chain(self):
@@ -1089,6 +1493,12 @@ class QuivrQARAGLangGraph:
         messages = [("system", system_prompt)] if system_prompt else []
         messages.append(("user", question))
 
+        try:
+            _lineaje_obs = _lineaje_load_gr_client()
+            _lineaje_obs_site = _lineaje_obs.SiteDescriptor(site_id='site:sha256:2767f8292f08f8493d84d82b95cff8d59e19f42cce29cdf7795c4785f7d0c23f', phase='', boundary={}, fail_mode='ALLOW', source_type='agent', destination_type='llm', components={'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1092, 'function': 'answer_astream', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'call_target': 'conversational_qa_chain.astream_events', 'not_on_graph': True}, observe_only=True)
+            await __import__('asyncio').to_thread(lambda: _lineaje_obs.enforce(_lineaje_obs_site, {'activity': 'agent_to_llm'}, content_type='application/json'))
+        except Exception:
+            pass
         async for event in conversational_qa_chain.astream_events(
             {
                 "messages": messages,
@@ -1179,9 +1589,35 @@ class QuivrQARAGLangGraph:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 output_class, method="json_schema"
             )
+            # LINEAJE: runtime guardrail checks `prompt` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.ainvoke_structured_output).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `prompt` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:7c634181d5021524a8d56df9955b8eb4e74fa70e83020a689b0d3861723fcee2'
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:7c634181d5021524a8d56df9955b8eb4e74fa70e83020a689b0d3861723fcee2', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1182, 'function': 'QuivrQARAGLangGraph.ainvoke_structured_output'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1182, 'function': 'ainvoke_structured_output', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                prompt = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, prompt, content_type='application/json', variable_name='prompt', source_file=__file__, before_line=1182))
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             return await structured_llm.ainvoke(prompt)
         except openai.BadRequestError:
             structured_llm = self.llm_endpoint._llm.with_structured_output(output_class)
+            # LINEAJE: runtime guardrail checks `prompt` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.ainvoke_structured_output).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `prompt` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:8bd0c55f699ee28d175088d4633c88cd18a2c8c6e2ba30a876f70c39741374d9'
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:8bd0c55f699ee28d175088d4633c88cd18a2c8c6e2ba30a876f70c39741374d9', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1185, 'function': 'QuivrQARAGLangGraph.ainvoke_structured_output'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1185, 'function': 'ainvoke_structured_output', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                prompt = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, prompt, content_type='application/json', variable_name='prompt', source_file=__file__, before_line=1185))
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             return await structured_llm.ainvoke(prompt)
 
     def invoke_structured_output(
@@ -1191,9 +1627,35 @@ class QuivrQARAGLangGraph:
             structured_llm = self.llm_endpoint._llm.with_structured_output(
                 output_class, method="json_schema"
             )
+            # LINEAJE: runtime guardrail checks `prompt` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.invoke_structured_output).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `prompt` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:94e66e40112a220834f5532fb9c6167ca6478126d0adbf5379657658b404b6be'
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:94e66e40112a220834f5532fb9c6167ca6478126d0adbf5379657658b404b6be', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1194, 'function': 'QuivrQARAGLangGraph.invoke_structured_output'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1194, 'function': 'invoke_structured_output', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                prompt = _gr_client.enforce(_gr_site, prompt, content_type='application/json', variable_name='prompt', source_file=__file__, before_line=1194)
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             return structured_llm.invoke(prompt)
         except openai.BadRequestError:
             structured_llm = self.llm_endpoint._llm.with_structured_output(output_class)
+            # LINEAJE: runtime guardrail checks `prompt` as it flows from the agent to the LLM, before it is sent to the model (in QuivrQARAGLangGraph.invoke_structured_output).
+            #   Detected: this statement moves data from the agent to the LLM with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates AI_AGENT_ACTIVITY_LOG, AI_APP_SEC_006, AI_APP_SEC_028, AI_APP_SEC_070 (+2 more); sensitive values in `prompt` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:f4f0fd943ff72da53ae37cb37e098b5ac7e668fd61298066edfb51599b5962f6'
+            _gr_client = _lineaje_load_gr_client()
+            _lineaje_interaction_id = _gr_client.new_interaction_id()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:f4f0fd943ff72da53ae37cb37e098b5ac7e668fd61298066edfb51599b5962f6', phase='pre_model', boundary={'source': 'agent_message', 'sink': 'model'}, fail_mode='BLOCK', source_type='agent', destination_type='llm', components={'source': {'entity_type': 'agent', 'unique_org_id': 'vdna_HSUl9QihFwySjoPY', 'repository_uri': 'https://github.com/lineaje-demo/quivr', 'file_path': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 256, 'name': 'QuivrQARAGLangGraph'}, 'invocation': {'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1197, 'function': 'QuivrQARAGLangGraph.invoke_structured_output'}, 'file': 'core/quivr_core/rag/quivr_rag_langgraph.py', 'line': 1197, 'function': 'invoke_structured_output', 'agent_name': 'QuivrQARAGLangGraph', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True}, interaction_id=_lineaje_interaction_id)
+            try:
+                prompt = _gr_client.enforce(_gr_site, prompt, content_type='application/json', variable_name='prompt', source_file=__file__, before_line=1197)
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            except PermissionError:
+                raise
             return structured_llm.invoke(prompt)
 
     def _build_rag_prompt_inputs(
