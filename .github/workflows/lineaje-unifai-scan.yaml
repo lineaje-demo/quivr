@@ -36,10 +36,6 @@ jobs:
       - name: Run Lineaje AI policy scan
         env:
           LINEAJE_PAT_TOKEN: ${{ secrets.LINEAJE_PAT_TOKEN }}
-          # Remediation PR token. GITHUB_TOKEN cannot open PRs when the org disables
-          # "Allow GitHub Actions to create and approve pull requests"; set the
-          # LINEAJE_FIX_PR_TOKEN secret (fine-grained PAT or GitHub App token with
-          # Contents + Pull requests: Read and write on this repo) to use it instead.
           GH_TOKEN: ${{ secrets.LINEAJE_FIX_PR_TOKEN || secrets.GITHUB_TOKEN }}
           MCP_TLS_INSECURE_SKIP_VERIFY: "1"
         run: |
