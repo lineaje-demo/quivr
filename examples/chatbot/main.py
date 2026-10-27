@@ -4,6 +4,8 @@ import chainlit as cl
 from quivr_core import Brain
 from quivr_core.rag.entities.config import RetrievalConfig
 
+# LINEAJE BUILD-TIME VIOLATION AI_DAT_SEC_001: a secret is hardcoded here. Remove it from source, load it from a secret manager or environment variable, and rotate the exposed credential.
+DB_PASSWORD = "Demo-Hardcoded-Passw0rd-12345"  # fake secret for the Lineaje demo
 
 @cl.on_chat_start
 async def on_chat_start():
