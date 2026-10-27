@@ -1,10 +1,17 @@
 import logging
+import os
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
+from pydantic import SecretStr
 
-from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
+from quivr_core.rag.entities.config import (
+    OPENROUTER_BASE_URL,
+    DefaultModelSuppliers,
+    LLMEndpointConfig,
+    use_openrouter,
+)
 from quivr_core.llm import LLMEndpoint
 
 logger = logging.getLogger("quivr_core")
@@ -35,6 +42,16 @@ def default_embedder() -> Embeddings:
         from langchain_openai import OpenAIEmbeddings
 
         logger.debug("Loaded OpenAIEmbeddings as default LLM for brain")
+        if use_openrouter():
+            # check_embedding_ctx_length=False: send raw text, OpenRouter does not take tiktoken ids
+            return OpenAIEmbeddings(
+                model=os.getenv(
+                    "OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small"
+                ),
+                base_url=OPENROUTER_BASE_URL,
+                api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
+                check_embedding_ctx_length=False,
+            )
         embedder = OpenAIEmbeddings()
         return embedder
     except ImportError as e:
@@ -46,9 +63,14 @@ def default_embedder() -> Embeddings:
 def default_llm() -> LLMEndpoint:
     try:
         logger.debug("Loaded ChatOpenAI as default LLM for brain")
-        llm = LLMEndpoint.from_config(
-            LLMEndpointConfig(supplier=DefaultModelSuppliers.OPENAI, model="gpt-4o")
-        )
+        if use_openrouter():
+            # supplier/model come from OPENROUTER_API_KEY / OPENROUTER_MODEL
+            config = LLMEndpointConfig()
+        else:
+            config = LLMEndpointConfig(
+                supplier=DefaultModelSuppliers.OPENAI, model="gpt-4o"
+            )
+        llm = LLMEndpoint.from_config(config)
         return llm
 
     except ImportError as e:
