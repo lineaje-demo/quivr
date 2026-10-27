@@ -3,7 +3,7 @@ import tempfile
 import chainlit as cl
 from quivr_core import Brain
 from quivr_core.rag.entities.config import RetrievalConfig
-DB_PASSWORD = "Demo-Hardcoded-Passw0rd-12345" 
+
 
 @cl.on_chat_start
 async def on_chat_start():
