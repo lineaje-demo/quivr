@@ -1,3 +1,17 @@
+# Copyright (c) Lineaje, Inc. All rights reserved.
+# Lineaje UnifAI guardrail  version=2.0.0-alpha
+def _lineaje_load_gr_client():
+    """Lineaje-added: load gr_stub_client.py (missing / broken: a pass-through client)."""
+    import sys, importlib.util as u, pathlib
+    n = "_lineaje_gr_stub_client"
+    if n in sys.modules: return sys.modules[n]
+    try:
+        h = pathlib.Path(__file__).resolve().parent
+        s = u.spec_from_file_location(n, next(p for p in (d / "gr_stub_client.py" for d in [h, *h.parents][:8]) if p.is_file()))
+        m = sys.modules[n] = u.module_from_spec(s); s.loader.exec_module(m); return m
+    except Exception:
+        sys.modules.pop(n, None); return __import__('types').SimpleNamespace(STUB_API=999999, GuardrailUnavailableError=type('GuardrailUnavailableError', (PermissionError,), {}), SiteDescriptor=lambda *a, **k: None, new_interaction_id=lambda *a, **k: None, enforce=lambda _s, _p, *a, **k: _p, enforce_request=lambda _s, _p, *a, **k: _p, enforce_reply=lambda _s, _p, *a, **k: _p)
+
 import json
 import os
 from pathlib import Path
@@ -18,7 +32,29 @@ from quivr_core.llm import LLMEndpoint
 def temp_data_file(tmp_path):
     data = "This is some test data."
     temp_file = tmp_path / "data.txt"
+    # LINEAJE: runtime guardrail checks `data` as it flows from the agent to a file, before it is written to disk (in temp_data_file).
+    #   Detected: this statement moves data from the agent to a file with no runtime policy check (detection confidence: high).
+    #   Decision: the Guardrail evaluates AI_DAT_SEC_025; sensitive values in `data` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+    #   Do not remove without review. site_id='site:sha256:654fd716f929a3e72312ec9006e8d88d2309e129e253160f0799e738d2300de9'
+    _gr_client = _lineaje_load_gr_client()
+    _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:654fd716f929a3e72312ec9006e8d88d2309e129e253160f0799e738d2300de9', phase='file_write', boundary={'source': 'agent_message', 'sink': 'file_content'}, fail_mode='BLOCK', source_type='agent', destination_type='file', components={'invocation': {'file': 'core/tests/conftest.py', 'line': 21, 'function': 'temp_data_file'}, 'file': 'core/tests/conftest.py', 'line': 21, 'function': 'temp_data_file', 'agent_name': 'temp_data_file', 'agent_name_source': 'inferred_from_function', 'not_on_graph': True})
+    try:
+        data = _gr_client.enforce(_gr_site, data, content_type='application/json', variable_name='data', source_file=__file__, before_line=21)
+    except _gr_client.GuardrailUnavailableError:
+        pass
     temp_file.write_text(data)
+    # LINEAJE: runtime guardrail checks `temp_file` as it flows from the agent to the user interface, before it leaves the application (in temp_data_file).
+    #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+    #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `temp_file` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+    #   Do not remove without review. site_id='site:sha256:9ccd438e42c5a91e16bcf1465b82d2a1deb52f36231a37f23e72b4c92ac43edb'
+    _gr_client = _lineaje_load_gr_client()
+    _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:9ccd438e42c5a91e16bcf1465b82d2a1deb52f36231a37f23e72b4c92ac43edb', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'invocation': {'file': 'core/tests/conftest.py', 'line': 22, 'function': 'temp_data_file'}, 'file': 'core/tests/conftest.py', 'line': 22, 'function': 'temp_data_file', 'agent_name': 'temp_data_file', 'agent_name_source': 'inferred_from_function', 'not_on_graph': True})
+    try:
+        temp_file = _gr_client.enforce(_gr_site, temp_file, content_type='text/plain')
+    except _gr_client.GuardrailUnavailableError:
+        pass
+    except PermissionError:
+        pass
     return temp_file
 
 
@@ -54,6 +90,18 @@ def full_response():
 @pytest.fixture
 def chunks_stream_answer():
     with open("./tests/chunk_stream_fixture.jsonl", "r") as f:
+        # LINEAJE: runtime guardrail checks `f` as it flows from file storage to the agent (in chunks_stream_answer).
+        #   Detected: this statement moves data from file storage to the agent with no runtime policy check (detection confidence: medium).
+        #   Decision: the Guardrail evaluates AI_APP_SEC_070, AI_DAT_SEC_023, AI_DAT_SEC_024; sensitive values in `f` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+        #   Do not remove without review. site_id='site:sha256:8da6f955c9948828e7bd9e8a52757c69cbcdaab5103ac2c07372e6533f7223c6'
+        _gr_client = _lineaje_load_gr_client()
+        _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:8da6f955c9948828e7bd9e8a52757c69cbcdaab5103ac2c07372e6533f7223c6', phase='file_upload', boundary={'source': 'file_upload', 'sink': 'agent_context'}, fail_mode='BLOCK', source_type='file_storage', destination_type='agent', components={'invocation': {'file': 'core/tests/conftest.py', 'line': 57, 'function': 'chunks_stream_answer'}, 'file': 'core/tests/conftest.py', 'line': 57, 'function': 'chunks_stream_answer', 'agent_name': 'chunks_stream_answer', 'agent_name_source': 'inferred_from_function', 'not_on_graph': True})
+        try:
+            f = _gr_client.enforce(_gr_site, f, content_type='application/json')
+        except _gr_client.GuardrailUnavailableError:
+            pass
+        except PermissionError:
+            raise
         raw_chunks = list(f)
 
     chunks = []
@@ -62,6 +110,18 @@ def chunks_stream_answer():
         if "answer" in chunk:
             chunk["answer"] = AIMessageChunk(**chunk["answer"])
             chunks.append(chunk)
+    # LINEAJE: runtime guardrail checks `chunks` as it flows from the agent to the user interface, before it leaves the application (in chunks_stream_answer).
+    #   Detected: this statement moves data from the agent to the user interface with no runtime policy check (detection confidence: high).
+    #   Decision: the Guardrail evaluates AI_DAT_SEC_012; sensitive values in `chunks` are masked in place; a policy violation stops the call (fail_mode=BLOCK). If the Guardrail is unreachable, the call continues unchanged.
+    #   Do not remove without review. site_id='site:sha256:0776a338adffbb4b26fe3dc32dc41889a4479ae931dfa03b55e761568f5ab674'
+    _gr_client = _lineaje_load_gr_client()
+    _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:0776a338adffbb4b26fe3dc32dc41889a4479ae931dfa03b55e761568f5ab674', phase='data_egress', boundary={'source': 'agent_message', 'sink': 'user_interface'}, fail_mode='BLOCK', source_type='agent', destination_type='user_interface', components={'invocation': {'file': 'core/tests/conftest.py', 'line': 65, 'function': 'chunks_stream_answer'}, 'file': 'core/tests/conftest.py', 'line': 65, 'function': 'chunks_stream_answer', 'agent_name': 'chunks_stream_answer', 'agent_name_source': 'inferred_from_function', 'not_on_graph': True})
+    try:
+        chunks = _gr_client.enforce(_gr_site, chunks, content_type='text/plain')
+    except _gr_client.GuardrailUnavailableError:
+        pass
+    except PermissionError:
+        pass
     return chunks
 
 
