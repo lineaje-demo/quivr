@@ -1,3 +1,17 @@
+# Copyright (c) Lineaje, Inc. All rights reserved.
+# Lineaje UnifAI guardrail  version=2.0.0-alpha
+def _lineaje_load_gr_client():
+    """Lineaje-added: load gr_stub_client.py (missing / broken: a pass-through client)."""
+    import sys, importlib.util as u, pathlib
+    n = "_lineaje_gr_stub_client"
+    if n in sys.modules: return sys.modules[n]
+    try:
+        h = pathlib.Path(__file__).resolve().parent
+        s = u.spec_from_file_location(n, next(p for p in (d / "gr_stub_client.py" for d in [h, *h.parents][:8]) if p.is_file()))
+        m = sys.modules[n] = u.module_from_spec(s); s.loader.exec_module(m); return m
+    except Exception:
+        sys.modules.pop(n, None); return __import__('types').SimpleNamespace(STUB_API=999999, GuardrailUnavailableError=type('GuardrailUnavailableError', (PermissionError,), {}), SiteDescriptor=lambda *a, **k: None, new_interaction_id=lambda *a, **k: None, enforce=lambda _s, _p, *a, **k: _p, enforce_request=lambda _s, _p, *a, **k: _p, enforce_reply=lambda _s, _p, *a, **k: _p)
+
 import logging
 from typing import Any, List, Type, TypeVar
 
@@ -81,6 +95,26 @@ def _build_processor(
                 loader = self.loader_cls()
 
             documents = await loader.aload()
+            # LINEAJE: runtime guardrail checks `documents` as it flows from a data source to the RAG pipeline, after the tool returns (in _Processor.process_file_inner).
+            #   Detected: this statement moves data from a data source to the RAG pipeline with no runtime policy check (detection confidence: medium).
+            #   Decision: the Guardrail evaluates the policies enabled for this boundary; sensitive values in `documents` are masked in place; a policy violation is logged and the call continues (fail_mode=ALLOW_WITH_AUDIT). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:a5f887ffe4da94aa65d3319ab85bdaa8200d18c4c01e32584dc8ad2b74ee95f2'
+            _gr_client = _lineaje_load_gr_client()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:a5f887ffe4da94aa65d3319ab85bdaa8200d18c4c01e32584dc8ad2b74ee95f2', phase='post_tool', boundary={'source': 'data_source', 'sink': 'rag_pipeline'}, fail_mode='ALLOW_WITH_AUDIT', source_type='data_source', destination_type='rag_pipeline', components={'invocation': {'file': 'core/quivr_core/processor/implementations/default.py', 'line': 83, 'function': '_build_processor._Processor.process_file_inner'}, 'file': 'core/quivr_core/processor/implementations/default.py', 'line': 83, 'function': 'process_file_inner', 'agent_name': '_Processor', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+            try:
+                documents = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, documents, content_type='application/json', variable_name='documents', source_file=__file__, before_line=83))
+            except _gr_client.GuardrailUnavailableError:
+                pass
+            # LINEAJE: runtime guardrail checks `documents` as it flows from rag source to the RAG pipeline, before the tool runs (in _Processor.process_file_inner).
+            #   Detected: this statement moves data from rag source to the RAG pipeline with no runtime policy check (detection confidence: high).
+            #   Decision: the Guardrail evaluates the policies enabled for this boundary; sensitive values in `documents` are masked in place; a policy violation is logged and the call continues (fail_mode=ALLOW_WITH_AUDIT). If the Guardrail is unreachable, the call continues unchanged.
+            #   Do not remove without review. site_id='site:sha256:a5617df644ac78b4dab04687a216e2f9102f871c8b553f2e65bf8e2b8438b71a'
+            _gr_client = _lineaje_load_gr_client()
+            _gr_site = _gr_client.SiteDescriptor(site_id='site:sha256:a5617df644ac78b4dab04687a216e2f9102f871c8b553f2e65bf8e2b8438b71a', phase='pre_tool', boundary={'source': 'rag_source', 'sink': 'rag_pipeline'}, fail_mode='ALLOW_WITH_AUDIT', source_type='rag_source', destination_type='rag_pipeline', components={'invocation': {'file': 'core/quivr_core/processor/implementations/default.py', 'line': 84, 'function': '_build_processor._Processor.process_file_inner'}, 'file': 'core/quivr_core/processor/implementations/default.py', 'line': 84, 'function': 'process_file_inner', 'agent_name': '_Processor', 'agent_name_source': 'inferred_from_class', 'not_on_graph': True})
+            try:
+                documents = await __import__('asyncio').to_thread(lambda: _gr_client.enforce(_gr_site, documents, content_type='application/json', variable_name='documents', source_file=__file__, before_line=84))
+            except _gr_client.GuardrailUnavailableError:
+                pass
             docs = self.text_splitter.split_documents(documents)
 
             for doc in docs:
