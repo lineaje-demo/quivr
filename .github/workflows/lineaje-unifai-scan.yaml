@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       create_fix_pr:
-        description: "Open a remediation PR with the code suggestions and intercepts"
+        description: "Open a remediation PR with the remediation suggestions"
         type: boolean
         default: true
 
@@ -33,20 +33,15 @@ jobs:
           cp .github/scm_unifai_scan_hybrid.py /tmp/scm_unifai_scan_hybrid.py
           rm -rf .github .git
 
-      - name: Prepare scan output folder
-        run: |
-          # Built from the runner's GITHUB_* variables: no context expressions inside run:.
-          RUN_DIR="/home/azureuser/unifai-scans/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}-${GITHUB_SHA::7}-${GITHUB_RUN_ID}"
-          mkdir -p "$RUN_DIR/source" "$RUN_DIR/tarballs"
-          echo "UNIFAI_RUN_DIR=$RUN_DIR" >> "$GITHUB_ENV"
-          touch "$RUN_DIR/.started"
-
       - name: Run Lineaje AI policy scan
         env:
           LINEAJE_PAT_TOKEN: ${{ secrets.LINEAJE_PAT_TOKEN }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          # Remediation PR token. GITHUB_TOKEN cannot open PRs when the org disables
+          # "Allow GitHub Actions to create and approve pull requests"; set the
+          # LINEAJE_FIX_PR_TOKEN secret (fine-grained PAT or GitHub App token with
+          # Contents + Pull requests: Read and write on this repo) to use it instead.
+          GH_TOKEN: ${{ secrets.LINEAJE_FIX_PR_TOKEN || secrets.GITHUB_TOKEN }}
           MCP_TLS_INSECURE_SKIP_VERIFY: "1"
-          UNIFAI_SCAN_ARCHIVE_DIR: ${{ env.UNIFAI_RUN_DIR }}/source
         run: |
           python /tmp/scm_unifai_scan_hybrid.py \
             --source-path . \
@@ -56,14 +51,3 @@ jobs:
             --mcp-server-url https://localhost/mcp \
             --pr-mode direct \
             ${{ inputs.create_fix_pr && '--create-fix-pr' || '' }} >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Collect result tarballs
-        if: always()
-        run: |
-          SRC=/home/azureuser/unifai-scans/tarballs
-          if [ -d "$SRC" ]; then
-            (cd "$SRC" && find . -type f -name '*.tar.gz' -newer "$UNIFAI_RUN_DIR/.started" \
-              -exec cp --parents {} "$UNIFAI_RUN_DIR/tarballs/" \;) || true
-          fi
-          echo "Scan output on the VM: $UNIFAI_RUN_DIR"
-          find "$UNIFAI_RUN_DIR" -type f ! -name .started -printf '  %P  (%s bytes)\n'
