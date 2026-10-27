@@ -69,7 +69,7 @@ async def process_files(
                 logger.debug(f"processing {file} using class {processor_cls.__name__}")
                 processor = processor_cls(**processor_kwargs)
                 docs = await processor.process_file(file)
-                knowledge.extend(docs)
+                knowledge.extend(docs.chunks)
             else:
                 logger.error(f"can't find processor for {file}")
                 if skip_file_error:
